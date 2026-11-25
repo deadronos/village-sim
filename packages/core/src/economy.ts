@@ -15,9 +15,9 @@ export const RECIPES: Partial<Record<Role, Recipe>> = {
   farmer: {
     role: "farmer",
     workplace: "fields",
-    inputs: {},
+    inputs: { tool: 1 },
     output: "wheat",
-    outputQty: 2,
+    outputQty: 3,
     label: "harvest wheat",
   },
   baker: {
@@ -63,13 +63,13 @@ export const RECIPES: Partial<Record<Role, Recipe>> = {
 };
 
 export const ITEM_PRICES: Record<ItemKind, number> = {
-  wheat: 4,
+  wheat: 5,
   water: 0,
-  bread: 5,
-  stew: 8,
+  bread: 4,
+  stew: 7,
   wood: 3,
   tool: 8,
-  herbs: 6,
+  herbs: 5,
 };
 
 export const ITEM_CAPS: Record<ItemKind, number> = {
@@ -83,9 +83,9 @@ export const ITEM_CAPS: Record<ItemKind, number> = {
 };
 
 export const NEED_DECAY = {
-  hunger: 0.035,
-  energy: -0.02,
-  social: -0.015,
+  hunger: 0.0175,
+  energy: -0.016,
+  social: -0.014,
 } as const;
 
 export function decayNeeds(entity: Entity): void {
@@ -289,7 +289,7 @@ export function consumeCarriedMeal(world: WorldState, entity: Entity): SimEvent 
   const time = formatSimTime(world.tick, world.minutesPerTick, world.startHour);
   if (getStock(entity, "stew") > 0) {
     addStock(entity, "stew", -1);
-    entity.needs.hunger = clamp01(entity.needs.hunger - 0.56);
+    entity.needs.hunger = clamp01(entity.needs.hunger - 0.52);
     entity.needs.energy = clamp01(entity.needs.energy + 0.12);
     entity.needs.social = clamp01(entity.needs.social + 0.06);
     entity.mealsToday += 1;
@@ -309,7 +309,7 @@ export function consumeCarriedMeal(world: WorldState, entity: Entity): SimEvent 
   }
   if (getStock(entity, "bread") > 0) {
     addStock(entity, "bread", -1);
-    entity.needs.hunger = clamp01(entity.needs.hunger - 0.45);
+    entity.needs.hunger = clamp01(entity.needs.hunger - 0.44);
     entity.needs.energy = clamp01(entity.needs.energy + 0.06);
     entity.mealsToday += 1;
     world.mealsToday += 1;
@@ -371,26 +371,24 @@ export function runScheduledEconomyEvents(world: WorldState): SimEvent[] {
         gold: allowance,
         message: `${time} ${entity.name.toLowerCase()} receives ${allowance}g allowance`,
       });
-    } else if (entity.role === "smith") {
-      const qty = Math.min(2, getStock(entity, "tool"));
-      if (qty > 0) {
-        const pay = qty * ITEM_PRICES.tool;
-        addStock(entity, "tool", -qty);
-        entity.gold += pay;
-        world.totalGoldMinted += pay;
-        pushMemory(entity, `town bought ${qty} tool for ${pay}g`);
-        events.push({
-          day: world.day,
-          tick: world.tick,
-          time,
-          kind: "demand",
-          entityId: entity.id,
-          item: "tool",
-          qty,
-          gold: pay,
-          message: `${time} town guild buys ${qty} tool from ${entity.name.toLowerCase()} for ${pay}g`,
-        });
-      }
+    } else if (entity.role === "smith" && getStock(entity, "tool") >= 4) {
+      const qty = 1;
+      const pay = qty * ITEM_PRICES.tool;
+      addStock(entity, "tool", -qty);
+      entity.gold += pay;
+      world.totalGoldMinted += pay;
+      pushMemory(entity, `town bought ${qty} surplus tool for ${pay}g`);
+      events.push({
+        day: world.day,
+        tick: world.tick,
+        time,
+        kind: "demand",
+        entityId: entity.id,
+        item: "tool",
+        qty,
+        gold: pay,
+        message: `${time} town guild buys ${qty} surplus tool from ${entity.name.toLowerCase()} for ${pay}g`,
+      });
     } else if (entity.role === "herbalist") {
       const qty = Math.min(2, getStock(entity, "herbs"));
       if (qty > 0) {
@@ -411,8 +409,8 @@ export function runScheduledEconomyEvents(world: WorldState): SimEvent[] {
           message: `${time} town apothecary buys ${qty} herbs from ${entity.name.toLowerCase()} for ${pay}g`,
         });
       }
-    } else if (entity.role === "woodcutter" && getStock(entity, "wood") >= 3) {
-      const pay = ITEM_PRICES.wood + 2;
+    } else if (entity.role === "woodcutter" && getStock(entity, "wood") >= 6) {
+      const pay = ITEM_PRICES.wood;
       addStock(entity, "wood", -1);
       entity.gold += pay;
       world.totalGoldMinted += pay;
@@ -428,27 +426,51 @@ export function runScheduledEconomyEvents(world: WorldState): SimEvent[] {
         gold: pay,
         message: `${time} town mill buys surplus wood from ${entity.name.toLowerCase()} for ${pay}g`,
       });
-    } else if (entity.role === "farmer" && getStock(entity, "wheat") >= 5) {
-      const pay = ITEM_PRICES.wheat + 1;
-      addStock(entity, "wheat", -1);
-      entity.gold += pay;
-      world.totalGoldMinted += pay;
-      pushMemory(entity, `merchant bought surplus wheat for ${pay}g`);
-      events.push({
-        day: world.day,
-        tick: world.tick,
-        time,
-        kind: "demand",
-        entityId: entity.id,
-        item: "wheat",
-        qty: 1,
-        gold: pay,
-        message: `${time} passing merchant buys surplus wheat from ${entity.name.toLowerCase()} for ${pay}g`,
-      });
     }
   }
 
   return events;
+}
+
+export interface WealthMetrics {
+  gini: number;
+  maxMinRatio: number;
+  minGold: number;
+  maxGold: number;
+  totalGold: number;
+}
+
+/**
+ * Compute wealth distribution metrics (Gini coefficient in [0, 1] and max/min ratio)
+ * across villager gold balances.
+ */
+export function computeWealthMetrics(golds: readonly number[]): WealthMetrics {
+  if (golds.length === 0) {
+    return { gini: 0, maxMinRatio: 1, minGold: 0, maxGold: 0, totalGold: 0 };
+  }
+  const sorted = golds.toSorted((a, b) => a - b);
+  const n = sorted.length;
+  const minGold = sorted[0]!;
+  const maxGold = sorted[n - 1]!;
+  const totalGold = sorted.reduce((sum, g) => sum + g, 0);
+
+  let gini = 0;
+  if (totalGold > 0 && n > 1) {
+    let weightedSum = 0;
+    for (let i = 0; i < n; i++) {
+      weightedSum += (2 * (i + 1) - n - 1) * sorted[i]!;
+    }
+    gini = weightedSum / (n * totalGold);
+  }
+
+  const maxMinRatio = maxGold === 0 ? 1 : maxGold / Math.max(1, minGold);
+  return {
+    gini: Math.round(Math.max(0, Math.min(1, gini)) * 1000) / 1000,
+    maxMinRatio: Math.round(maxMinRatio * 100) / 100,
+    minGold,
+    maxGold,
+    totalGold,
+  };
 }
 
 /**

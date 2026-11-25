@@ -274,6 +274,8 @@ export interface DaySummary {
   p50LatencyMs: number;
   p95LatencyMs: number;
   fallbackRate: number;
+  wealthGini: number;
+  wealthMaxMinRatio: number;
   finalStateHash: string;
   entities: Array<{
     id: string;

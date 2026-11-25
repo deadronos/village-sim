@@ -24,6 +24,9 @@ export interface GatingRule {
 export function findRestockOption(world: WorldState, entity: Entity): RestockOption | null {
   const recipe = RECIPES[entity.role];
   if (!recipe) return null;
+  const hasInputs = Object.keys(recipe.inputs).length > 0;
+  const headroom = ITEM_CAPS[recipe.output] - getStock(entity, recipe.output);
+  if (headroom < (hasInputs ? recipe.outputQty : 1)) return null;
 
   const missing = getMissingInputs(entity, recipe);
   if (missing.length === 0) return null;
@@ -96,7 +99,9 @@ export const GATING_RULES: readonly GatingRule[] = [
       const recipe = RECIPES[entity.role];
       if (!recipe) return false;
       if (!hasRecipeInputs(entity, recipe)) return false;
-      return getStock(entity, recipe.output) < ITEM_CAPS[recipe.output];
+      const hasInputs = Object.keys(recipe.inputs).length > 0;
+      const headroom = ITEM_CAPS[recipe.output] - getStock(entity, recipe.output);
+      return headroom >= (hasInputs ? recipe.outputQty : 1);
     },
   },
   {
@@ -113,9 +118,7 @@ export const GATING_RULES: readonly GatingRule[] = [
     action: "buy_food",
     describe: (_entity) => "get food and eat",
     isAllowed: (world, entity) => {
-      const carryingFood = getStock(entity, "bread") > 0 || getStock(entity, "stew") > 0;
-      const wantsFood = entity.needs.hunger > 0.4 || carryingFood;
-      if (!wantsFood) return false;
+      if (entity.needs.hunger <= 0.4) return false;
       return hasAffordableFoodSource(world, entity);
     },
   },
