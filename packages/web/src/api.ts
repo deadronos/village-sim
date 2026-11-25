@@ -20,11 +20,21 @@ export interface ClientStatus {
   running: boolean;
   finished: boolean;
   tickMs: number;
+  effectiveTickMs?: number;
+  lastTickMs?: number;
   mode: "live" | "replay";
   replayFile?: string;
   config: Pick<
     SimConfig,
-    "provider" | "endpoint" | "model" | "seed" | "days" | "sample" | "minConf" | "batch"
+    | "provider"
+    | "endpoint"
+    | "model"
+    | "seed"
+    | "days"
+    | "sample"
+    | "minConf"
+    | "batch"
+    | "maxBatch"
   >;
   warnings: string[];
 }
@@ -130,6 +140,8 @@ export class VillageApiClient {
       running: this.localRunning,
       finished: this.localSim?.isFinished ?? false,
       tickMs: this.localTickMs,
+      effectiveTickMs: this.localTickMs,
+      lastTickMs: 0,
       mode: "live",
       config: {
         provider: this.localConfig.provider,
@@ -140,6 +152,7 @@ export class VillageApiClient {
         sample: this.localConfig.sample,
         minConf: this.localConfig.minConf,
         batch: this.localConfig.batch,
+        maxBatch: this.localConfig.maxBatch,
       },
       warnings: ["Running in standalone browser mode (Node backend not detected)."],
     };

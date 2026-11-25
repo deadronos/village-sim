@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CONFIG,
   ITEM_CAPS,
+  ITEM_PRICES,
   RECIPES,
   ScriptedProvider,
   VillageSimulation,
@@ -210,21 +211,21 @@ describe("Economy, recipes, caps, and invariants", () => {
         const table = formatDaySummaryTable(day);
         expect(table).toContain(`Wealth: Gini ${day.wealthGini.toFixed(3)}`);
 
-        const currentZeroStocked = new Set<string>();
+        const currentLowGoldStocked = new Set<string>();
         for (const entity of day.entities) {
           const recipe = RECIPES[entity.role];
           if (!recipe) continue;
           const outputStock = entity.stock[recipe.output] ?? 0;
-          if (entity.gold === 0 && outputStock > 0) {
+          if (entity.gold < ITEM_PRICES.bread && outputStock > 0) {
             expect(
               prevZeroStocked.has(entity.id),
-              `seed ${seed} day ${day.day}: ${entity.id} ended consecutive days at 0g holding ${recipe.output}:${outputStock}`,
+              `seed ${seed} day ${day.day}: ${entity.id} ended consecutive days below bread price (${entity.gold}g) holding ${recipe.output}:${outputStock}`,
             ).toBe(false);
-            currentZeroStocked.add(entity.id);
+            currentLowGoldStocked.add(entity.id);
           }
         }
         prevZeroStocked.clear();
-        for (const id of currentZeroStocked) prevZeroStocked.add(id);
+        for (const id of currentLowGoldStocked) prevZeroStocked.add(id);
       }
     }
   });
