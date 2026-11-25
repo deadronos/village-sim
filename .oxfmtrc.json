@@ -1,0 +1,3 @@
+{
+  "ignorePatterns": ["dist/**", "runs/**", "pnpm-lock.yaml", "IDEA.md"]
+}

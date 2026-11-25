@@ -1,0 +1,26 @@
+{
+  "name": "village-sim",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm --parallel --filter @village/server --filter @village/web dev",
+    "dev:server": "pnpm --filter @village/server dev",
+    "dev:web": "pnpm --filter @village/web dev",
+    "village": "pnpm --filter @village/server --silent village",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "oxlint",
+    "fmt": "oxfmt --write .",
+    "fmt:check": "oxfmt --check ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxfmt": "^0.80.0",
+    "oxlint": "^1.95.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.1"
+  }
+}

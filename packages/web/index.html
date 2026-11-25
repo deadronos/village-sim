@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Village Sim — Autonomous Low-Poly WebGPU Village</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewport" aria-label="Interactive 3D low-poly village diorama"></div>
+
+      <!-- Top Floating Control Bar -->
+      <header class="hud-topbar" aria-label="Simulation controls">
+        <div class="brand-group">
+          <span class="brand-dot" aria-hidden="true"></span>
+          <span class="brand-title">Village Sim</span>
+          <span id="renderer-badge" class="pill pill-accent">Init…</span>
+          <span id="connection-badge" class="pill">Connecting…</span>
+        </div>
+
+        <div class="clock-group" aria-live="off">
+          <span id="clock-day" class="clock-day">Day 1</span>
+          <span id="clock-time" class="clock-time">06:00</span>
+          <span id="weather-pill" class="pill">clear</span>
+        </div>
+
+        <div class="controls-group">
+          <button
+            id="btn-play"
+            class="btn btn-primary"
+            type="button"
+            title="Play or pause simulation"
+          >
+            Pause
+          </button>
+          <button id="btn-step" class="btn" type="button" title="Advance one tick">Step</button>
+          <label class="speed-control" for="speed-slider">
+            <span>Speed</span>
+            <input
+              id="speed-slider"
+              type="range"
+              min="150"
+              max="2000"
+              step="50"
+              value="850"
+              aria-label="Tick speed"
+            />
+          </label>
+          <button
+            id="btn-settings"
+            class="btn"
+            type="button"
+            title="Configure seed, provider, or replay"
+          >
+            Run / Replay
+          </button>
+        </div>
+      </header>
+
+      <!-- Villager Quick Roster Strip (left side) -->
+      <aside class="hud-roster" aria-label="Villager roster">
+        <div class="roster-heading">Villagers</div>
+        <div id="roster-list" class="roster-list"></div>
+      </aside>
+
+      <!-- Right Collapsible Inspector & Timeline Panel -->
+      <aside id="side-panel" class="hud-panel" aria-label="Timeline and villager inspector">
+        <div class="panel-tabs" role="tablist">
+          <button
+            id="tab-timeline"
+            class="tab-btn active"
+            type="button"
+            role="tab"
+            aria-selected="true"
+            aria-controls="view-timeline"
+          >
+            Timeline
+          </button>
+          <button
+            id="tab-inspector"
+            class="tab-btn"
+            type="button"
+            role="tab"
+            aria-selected="false"
+            aria-controls="view-inspector"
+          >
+            Inspector
+          </button>
+          <button
+            id="btn-toggle-panel"
+            class="icon-btn"
+            type="button"
+            title="Collapse or expand panel"
+            aria-label="Toggle side panel"
+          >
+            ✕
+          </button>
+        </div>
+
+        <section
+          id="view-timeline"
+          class="panel-body scroller"
+          role="tabpanel"
+          aria-labelledby="tab-timeline"
+        >
+          <div id="warning-banner" class="warning-banner" hidden></div>
+          <ul id="event-feed" class="event-feed"></ul>
+        </section>
+
+        <section
+          id="view-inspector"
+          class="panel-body scroller"
+          role="tabpanel"
+          aria-labelledby="tab-inspector"
+          hidden
+        >
+          <div id="inspector-empty" class="empty-state">
+            Click any villager in the 3D village or the left roster to inspect their live needs,
+            probability distribution, memory ring, and exact serialized prompt.
+          </div>
+          <div id="inspector-content" hidden>
+            <div class="inspector-header">
+              <div>
+                <h2 id="insp-name">Anna</h2>
+                <p id="insp-subtitle" class="muted">Baker · Today's focus: duty</p>
+              </div>
+              <button id="btn-focus-cam" class="btn btn-sm" type="button">Focus 3D</button>
+            </div>
+
+            <div class="kv-grid">
+              <div class="kv-card">
+                <span class="kv-label">Location</span>
+                <strong id="insp-location">bakery</strong>
+              </div>
+              <div class="kv-card">
+                <span class="kv-label">Gold</span>
+                <strong id="insp-gold">20g</strong>
+              </div>
+              <div class="kv-card">
+                <span class="kv-label">Meals Today</span>
+                <strong id="insp-meals">0</strong>
+              </div>
+              <div class="kv-card">
+                <span class="kv-label">Active Goal</span>
+                <strong id="insp-goal">idle</strong>
+              </div>
+            </div>
+
+            <div class="section-block">
+              <h3>Needs</h3>
+              <div class="need-row">
+                <span>Hunger</span>
+                <div class="meter"><div id="bar-hunger" class="meter-fill meter-hunger"></div></div>
+                <span id="val-hunger" class="mono">0.00</span>
+              </div>
+              <div class="need-row">
+                <span>Energy</span>
+                <div class="meter"><div id="bar-energy" class="meter-fill meter-energy"></div></div>
+                <span id="val-energy" class="mono">0.00</span>
+              </div>
+              <div class="need-row">
+                <span>Social</span>
+                <div class="meter"><div id="bar-social" class="meter-fill meter-social"></div></div>
+                <span id="val-social" class="mono">0.00</span>
+              </div>
+            </div>
+
+            <div class="section-block">
+              <h3>Inventory</h3>
+              <div id="insp-inventory" class="chip-row"></div>
+            </div>
+
+            <div class="section-block">
+              <div class="section-head-row">
+                <h3>Last Decision Distribution</h3>
+                <span id="insp-provider" class="pill">scripted</span>
+              </div>
+              <div id="insp-probs" class="prob-list"></div>
+            </div>
+
+            <div class="section-block">
+              <h3>Memory Ring (≤4)</h3>
+              <ul id="insp-memory" class="memory-list"></ul>
+            </div>
+
+            <div class="section-block">
+              <h3>Serialized Prompt (<code>--explain</code>)</h3>
+              <pre id="insp-prompt" class="prompt-box"></pre>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <button
+        id="btn-reopen-panel"
+        class="reopen-pill"
+        type="button"
+        hidden
+        aria-label="Open timeline and inspector"
+      >
+        Inspector &amp; Feed
+      </button>
+
+      <!-- Bottom Economy Telemetry Strip -->
+      <footer class="hud-bottombar" aria-label="Village economy summary">
+        <div class="stat-item">
+          <span class="stat-label">Trades</span>
+          <strong id="stat-trades">0</strong>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Bread</span>
+          <strong id="stat-bread">0</strong>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Stew</span>
+          <strong id="stat-stew">0</strong>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Meals</span>
+          <strong id="stat-meals">0</strong>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Village Gold</span>
+          <strong id="stat-gold">0g</strong>
+        </div>
+        <div class="stat-item">
+          <span class="stat-label">Provider</span>
+          <strong id="stat-provider">scripted</strong>
+        </div>
+        <div class="stat-item stat-hash">
+          <span class="stat-label">State Hash</span>
+          <code id="stat-hash">—</code>
+        </div>
+      </footer>
+
+      <!-- Native Modal Dialog for Run Configuration & Replay -->
+      <dialog id="settings-dialog" aria-labelledby="settings-title" closedby="any">
+        <div class="dialog-inner">
+          <div class="dialog-header">
+            <h1 id="settings-title">Simulation &amp; Replay</h1>
+            <button id="btn-close-dialog" class="icon-btn" type="button" aria-label="Close dialog">
+              ✕
+            </button>
+          </div>
+
+          <form id="reset-form" class="dialog-form">
+            <div class="form-grid">
+              <label>
+                <span>Seed</span>
+                <input id="cfg-seed" type="number" min="1" max="999999" value="7" autofocus />
+              </label>
+              <label>
+                <span>Days</span>
+                <input id="cfg-days" type="number" min="1" max="30" value="7" />
+              </label>
+              <label>
+                <span>Provider</span>
+                <select id="cfg-provider">
+                  <option value="scripted">scripted (offline)</option>
+                  <option value="systemone">systemone (HTTP)</option>
+                </select>
+              </label>
+              <label>
+                <span>Sampling</span>
+                <select id="cfg-sample">
+                  <option value="weighted">weighted (seeded)</option>
+                  <option value="argmax">argmax</option>
+                </select>
+              </label>
+            </div>
+
+            <label class="full-width">
+              <span>System One Endpoint</span>
+              <input
+                id="cfg-endpoint"
+                type="url"
+                value="http://127.0.0.1:8009/v1/systemone"
+                placeholder="http://127.0.0.1:8009/v1/systemone"
+              />
+            </label>
+
+            <label class="full-width">
+              <span>Model Alias</span>
+              <input id="cfg-model" type="text" value="kev-latest" />
+            </label>
+
+            <div class="dialog-actions">
+              <button type="submit" class="btn btn-primary">Restart Simulation</button>
+            </div>
+          </form>
+
+          <hr class="dialog-divider" />
+
+          <div class="replay-section">
+            <h2>Saved JSONL Runs</h2>
+            <p class="muted">Replay any recorded run deterministically in 3D.</p>
+            <div id="saved-runs-list" class="runs-list"></div>
+          </div>
+        </div>
+      </dialog>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
