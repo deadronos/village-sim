@@ -4,6 +4,7 @@ import {
   RECIPES,
   applyDeadlockRelief,
   assertWorldInvariants,
+  computeWealthMetrics,
   consumeCarriedMeal,
   decayNeeds,
   drawWaterFromWell,
@@ -254,8 +255,17 @@ export class VillageSimulation {
         chosenFocus = (fallbackAns.choice as Focus) ?? "duty";
       }
 
-      // Confidence escalation on dawn plan if below threshold
-      if (!usedFallback && sampled.prob < this.config.minConf) {
+      // Confidence escalation on dawn plan if below threshold (not applicable for scripted provider)
+      const dawnReplayRec =
+        this.provider instanceof ReplayProvider
+          ? this.provider.getRecord(world.day, -1, qId)
+          : undefined;
+      const isScriptedDawn =
+        this.config.provider === "scripted" ||
+        res.meta.provider === "scripted" ||
+        dawnReplayRec?.provider === "scripted";
+
+      if (!usedFallback && !isScriptedDawn && sampled.prob < this.config.minConf) {
         escalated = true;
         const escSample =
           this.config.sample === "argmax"
@@ -384,13 +394,17 @@ export class VillageSimulation {
             ? findSuppliersForItem(world, "bread", entity.id, 1)
             : [];
 
+        const stewChance =
+          world.weather === "rain"
+            ? 0.95
+            : world.weather === "overcast"
+              ? 0.85
+              : world.weather === "breezy"
+                ? 0.45
+                : 0.2;
         const preferStew =
           stewSellers.length > 0 &&
-          (breadSellers.length === 0 ||
-            world.weather === "rain" ||
-            entity.needs.social < 0.55 ||
-            world.tick >= 36 ||
-            rng.next() < 0.45);
+          (breadSellers.length === 0 || entity.needs.social < 0.3 || rng.next() < stewChance);
 
         if (preferStew && stewSellers[0]) {
           return makeGoal("buy_food", stewSellers[0].workplace, {
@@ -493,7 +507,15 @@ export class VillageSimulation {
           const seller = getEntityById(world, goal.targetEntity);
           if (seller) {
             const prevAff = entity.affinity[seller.id] ?? 0.5;
-            const trade = executeTrade(world, entity, seller, goal.targetItem, 1);
+            const unitPrice = ITEM_PRICES[goal.targetItem];
+            const maxAffordable = unitPrice > 0 ? Math.floor(entity.gold / unitPrice) : 2;
+            const maxHeadroom = ITEM_CAPS[goal.targetItem] - getStock(entity, goal.targetItem);
+            const desiredQty = goal.targetItem === "wheat" || goal.targetItem === "wood" ? 2 : 1;
+            const buyQty = Math.max(
+              1,
+              Math.min(desiredQty, getStock(seller, goal.targetItem), maxHeadroom, maxAffordable),
+            );
+            const trade = executeTrade(world, entity, seller, goal.targetItem, buyQty);
             if (trade.ok && trade.event) {
               actionSucceeded = true;
               this.emitEvent(trade.event, tickEvents);
@@ -865,8 +887,17 @@ export class VillageSimulation {
         let chosenAction = sampled.key as ActionKind;
         let escalated = false;
 
-        // Confidence escalation (§7.3)
-        if (!usedFallback && sampled.prob < this.config.minConf) {
+        // Confidence escalation (§7.3 — not applicable for scripted provider)
+        const tickReplayRec =
+          this.provider instanceof ReplayProvider
+            ? this.provider.getRecord(world.day, world.tick, qId)
+            : undefined;
+        const isScriptedTick =
+          this.config.provider === "scripted" ||
+          res.meta.provider === "scripted" ||
+          tickReplayRec?.provider === "scripted";
+
+        if (!usedFallback && !isScriptedTick && sampled.prob < this.config.minConf) {
           escalated = true;
           const escRng = createStreamRng(world.seed, world.day, world.tick, entity.id, "act_esc");
           const escSample =
@@ -972,6 +1003,7 @@ export class VillageSimulation {
 
     if (isLastTickOfDay) {
       const minMeals = Math.min(...world.entities.map((e) => e.mealsToday));
+      const wealth = computeWealthMetrics(world.entities.map((e) => e.gold));
       const fallbackRate =
         this.dayTelemetry.providerDecisions > 0
           ? this.dayTelemetry.fallbackDecisions / this.dayTelemetry.providerDecisions
@@ -980,6 +1012,7 @@ export class VillageSimulation {
       daySummary = {
         day: world.day,
         weather: world.weather,
+        provider: this.config.provider,
         trades: world.tradesToday,
         breadProduced: world.breadProducedToday,
         stewProduced: world.stewProducedToday,
@@ -993,6 +1026,8 @@ export class VillageSimulation {
         p50LatencyMs: percentile(this.dayTelemetry.latenciesMs, 50),
         p95LatencyMs: percentile(this.dayTelemetry.latenciesMs, 95),
         fallbackRate,
+        wealthGini: wealth.gini,
+        wealthMaxMinRatio: wealth.maxMinRatio,
         finalStateHash: stateHash,
         entities: world.entities.map((e) => ({
           id: e.id,

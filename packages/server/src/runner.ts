@@ -1,5 +1,5 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, join } from "node:path";
 import {
   DEFAULT_CONFIG,
   ReplayProvider,
@@ -16,7 +16,11 @@ import {
   type SimEvent,
   type TickSnapshot,
 } from "@village/core";
-import { createProviderForConfig } from "./config-loader.ts";
+import {
+  createProviderForConfig,
+  getInvocationCwd,
+  resolveFromInvocationCwd,
+} from "./config-loader.ts";
 
 export const DEFAULT_LIVE_TICK_MS = 850;
 export const DEFAULT_SYSTEMONE_TICK_MS = 2000;
@@ -86,7 +90,9 @@ export class LiveSimManager {
     this.customTickMs = options.tickMs !== undefined;
     this.tickMs = options.tickMs ?? defaultTickMsForProvider(this.config.provider);
     this.effectiveTickMs = this.tickMs;
-    this.runsDir = resolve(options.runsDir ?? join(process.cwd(), "runs"));
+    this.runsDir = options.runsDir
+      ? resolveFromInvocationCwd(options.runsDir)
+      : join(getInvocationCwd(), "runs");
     this.sim = this.createSimulation(this.config);
     this.latestSnapshot = this.makeInitialSnapshot();
   }

@@ -25,6 +25,7 @@ Open **http://localhost:5173** to watch the low-poly village live, click any vil
 
 ```bash
 # Run 3 simulated days offline with the zero-dependency scripted provider
+# (writes runs/seed-7.jsonl relative to your current directory; override with --out)
 pnpm village run --seed 7 --days 3 --provider scripted
 
 # Run against a local System One endpoint (e.g. Kev / Jev)
@@ -79,3 +80,8 @@ pnpm build       # Build core, server, and Vite web bundle
 - [`packages/core`](packages/core/src): Portable deterministic simulation engine (place graph with Dijkstra shortest paths, recipes/trades/wages/caps/invariants, data-driven gating table, compact prompt serializer, per-entity seeded PRNG, synchronous SHA-256 canonical state hashing, `ScriptedProvider`, `SystemOneProvider`, `ReplayProvider`).
 - [`packages/server`](packages/server/src): CLI (`run`, `replay`, `explain`, `serve`) and zero-dependency Node HTTP + SSE live backend server.
 - [`packages/web`](packages/web/src): Vite + Three.js `WebGPURenderer` low-poly floating island diorama with procedural landmarks, cobblestone roads matching the place graph, animated villagers, dynamic day/night lighting & weather, and an interactive inspector HUD.
+- [`reference/village`](reference/village): Original stdlib-only Python reference implementation (restored from commit `7a112a0`) and its [`reference/README.md`](reference/README.md), preserved for behaviour and measurement provenance alongside `IDEA.md` §16.
+
+## Contributing & History Policy
+
+- **Document history rewrites:** If `main` or another long-lived branch is ever rewritten or recreated (e.g. an orphan branch swap), the commit message and PR description must explicitly state the reason and document any dropped or relocated reference material so provenance is never silently lost.

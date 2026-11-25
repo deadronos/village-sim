@@ -243,10 +243,12 @@ export class VillageHud {
     this.latestStatus = status;
     this.btnPlay.textContent = status.running ? "Pause" : status.finished ? "Restart" : "Play";
     this.speedSlider.value = String(status.tickMs);
-    this.statProvider.textContent =
+    const providerLabel =
       status.mode === "replay"
         ? `replay (${status.replayFile ?? "jsonl"})`
         : `${status.config.provider} · seed ${status.config.seed}`;
+    this.statProvider.textContent = providerLabel;
+    this.statProvider.title = providerLabel;
 
     if (status.warnings.length > 0) {
       this.warningBanner.hidden = false;
@@ -278,6 +280,7 @@ export class VillageHud {
     this.statMeals.textContent = String(snapshot.stats.mealsToday);
     this.statGold.textContent = `${snapshot.stats.totalGold}g`;
     this.statHash.textContent = snapshot.stateHash.slice(0, 12);
+    this.statHash.title = snapshot.stateHash;
 
     const notable = snapshot.events.filter((e) => e.kind !== "move");
     if (notable.length > 0) {

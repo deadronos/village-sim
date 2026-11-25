@@ -57,9 +57,14 @@ body {
 #viewport {
   position: absolute;
   inset: 0;
+  z-index: 0;
   width: 100%;
   height: 100%;
   cursor: grab;
+}
+
+[hidden] {
+  display: none !important;
 }
 
 #viewport:active {
@@ -417,10 +422,13 @@ pre {
 }
 
 .hud-panel[hidden] {
-  display: none;
+  display: none !important;
 }
 
 .panel-tabs {
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -447,9 +455,16 @@ pre {
 }
 
 .panel-body {
+  position: relative;
+  z-index: 1;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px;
+}
+
+.panel-body[hidden] {
+  display: none !important;
 }
 
 .reopen-pill {
@@ -816,6 +831,7 @@ pre {
   align-items: baseline;
   gap: 6px;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .stat-label {
@@ -823,6 +839,22 @@ pre {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.stat-provider,
+.stat-hash {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.stat-provider strong,
+.stat-hash code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .stat-hash code {

@@ -264,6 +264,7 @@ export type JsonlRecord = HeaderLogRecord | DecisionLogRecord | TickHashRecord;
 export interface DaySummary {
   day: number;
   weather: Weather;
+  provider: ProviderKind;
   trades: number;
   breadProduced: number;
   stewProduced: number;
@@ -277,6 +278,8 @@ export interface DaySummary {
   p50LatencyMs: number;
   p95LatencyMs: number;
   fallbackRate: number;
+  wealthGini: number;
+  wealthMaxMinRatio: number;
   finalStateHash: string;
   entities: Array<{
     id: string;
