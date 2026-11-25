@@ -44,10 +44,10 @@ function sanitizeAnswer(raw: unknown, question: Question): Answer | null {
 
     if (total <= 0 || !Number.isFinite(total)) return null;
 
-    const { key: choice } = pickArgmax(probs);
     for (const [k, v] of Object.entries(probs)) {
       probs[k] = v / total;
     }
+    const { key: choice } = pickArgmax(probs);
 
     return {
       type: "choice",
