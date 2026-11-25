@@ -1,3 +1,4 @@
+import { pickArgmax } from "../rng.ts";
 import type { Answer, BatchMode, DecisionProvider, ProviderResult, Question } from "../types.ts";
 import { ScriptedProvider } from "./scripted.ts";
 
@@ -41,32 +42,30 @@ function sanitizeAnswer(raw: unknown, question: Question): Answer | null {
       total += v;
     }
 
-    if (total <= 0) return null;
+    if (total <= 0 || !Number.isFinite(total)) return null;
 
-    // Normalize probabilities over valid criteria keys
-    let bestKey = "";
-    let bestVal = -1;
     for (const [k, v] of Object.entries(probs)) {
-      const normalized = v / total;
-      probs[k] = normalized;
-      if (normalized > bestVal) {
-        bestVal = normalized;
-        bestKey = k;
-      }
+      probs[k] = v / total;
     }
+    const { key: choice } = pickArgmax(probs);
 
     return {
       type: "choice",
-      choice: typeof obj.choice === "string" && allowedKeys.has(obj.choice) ? obj.choice : bestKey,
+      choice,
       probabilities: probs,
-      confidence:
-        typeof obj.confidence === "number" && Number.isFinite(obj.confidence)
-          ? obj.confidence
-          : bestVal,
+      confidence: probs[choice]!,
     };
   }
 
   return null;
+}
+
+function missingAnswerMetadata(
+  questions: Record<string, Question>,
+  answers: Record<string, Answer>,
+) {
+  const fallbackQuestionIds = Object.keys(questions).filter((id) => !Object.hasOwn(answers, id));
+  return { fallbackUsed: fallbackQuestionIds.length > 0, fallbackQuestionIds };
 }
 
 /**
@@ -208,6 +207,7 @@ export class SystemOneProvider implements DecisionProvider {
             latencyMs,
             provider: this.name,
             batched: true,
+            ...missingAnswerMetadata(questions, answers),
           },
         };
       } catch (err) {
@@ -231,7 +231,6 @@ export class SystemOneProvider implements DecisionProvider {
     let totalLatency = 0;
     let networkFailures = 0;
     let anySuccess = false;
-    let anyFallback = false;
 
     for (const [qId, q] of Object.entries(questions)) {
       try {
@@ -247,7 +246,6 @@ export class SystemOneProvider implements DecisionProvider {
         if (!(err instanceof HttpStatusError)) {
           networkFailures += 1;
         }
-        anyFallback = true;
       }
     }
 
@@ -273,7 +271,7 @@ export class SystemOneProvider implements DecisionProvider {
         latencyMs: totalLatency,
         provider: anySuccess ? this.name : this.fallback.name,
         batched: false,
-        fallbackUsed: anyFallback && !anySuccess,
+        ...missingAnswerMetadata(questions, answers),
       },
     };
   }
@@ -340,7 +338,7 @@ export class SystemOneProvider implements DecisionProvider {
         latencyMs: totalLatency,
         provider: this.name,
         batched: false,
-        fallbackUsed: successes < Object.keys(questions).length,
+        ...missingAnswerMetadata(questions, answers),
       },
     };
   }

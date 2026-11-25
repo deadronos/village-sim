@@ -41,12 +41,12 @@ export class ReplayProvider implements DecisionProvider {
     _seed: number,
   ): Promise<ProviderResult> {
     const answers: Record<string, Answer> = {};
-    let anyFallback = false;
+    const fallbackQuestionIds: string[] = [];
 
     for (const qId of Object.keys(questions)) {
       const rec = this.recordsByKey.get(this.keyFor(this.currentDay, this.currentTick, qId));
       if (!rec) continue;
-      if (rec.fallback) anyFallback = true;
+      if (rec.fallback) fallbackQuestionIds.push(qId);
       answers[qId] = {
         type: "choice",
         choice: rec.action,
@@ -61,7 +61,8 @@ export class ReplayProvider implements DecisionProvider {
         latencyMs: 0,
         provider: this.name,
         batched: Object.keys(questions).length > 1,
-        fallbackUsed: anyFallback,
+        fallbackUsed: fallbackQuestionIds.length > 0,
+        fallbackQuestionIds,
       },
     };
   }

@@ -34,6 +34,8 @@ export interface ProviderCallMetadata {
   provider: string;
   batched: boolean;
   fallbackUsed?: boolean;
+  /** When present, only these questions used or require fallback. */
+  fallbackQuestionIds?: readonly string[];
   error?: string;
 }
 
