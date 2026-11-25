@@ -2,15 +2,7 @@ import { DEFAULT_CONFIG } from "./config.ts";
 import { ITEM_CAPS, RECIPES, findSuppliersForItem } from "./economy.ts";
 import { hasAffordableFoodSource } from "./gating.ts";
 import { getTopBonds, getTopRumor } from "./gossip.ts";
-import {
-  SCRIPTED_INSTRUCTIONS,
-  type ChoiceQuestion,
-  type Entity,
-  type Focus,
-  type ItemKind,
-  type Rumor,
-  type WorldState,
-} from "./types.ts";
+import type { ChoiceQuestion, Entity, Focus, ItemKind, Rumor, WorldState } from "./types.ts";
 import { formatSimTime, getEntityById, getStock } from "./world.ts";
 
 export const DAWN_FOCUS_CRITERIA: Record<Focus, string> = {
@@ -84,7 +76,7 @@ function rumorInstructions(
   entity: Entity,
   maxAgeDays: number,
   render: (memory: readonly string[], hint: string) => string,
-): Pick<ChoiceQuestion, "instructions" | typeof SCRIPTED_INSTRUCTIONS> {
+): Pick<ChoiceQuestion, "instructions" | "scriptedInstructions"> {
   const recent = entity.memory.filter((entry) => !entry.startsWith("heard from "));
   const rumor = getTopRumor(
     entity,
@@ -100,7 +92,7 @@ function rumorInstructions(
 
   return {
     instructions: render(recent, modelHint),
-    [SCRIPTED_INSTRUCTIONS]: render(
+    scriptedInstructions: render(
       entity.memory,
       legacyRumor ? ` Heard: ${legacyRumor.summary}.` : "",
     ),

@@ -97,13 +97,55 @@ describe("System One confidence escalation", () => {
     }
   });
 
-  it("validates the configured escalation metric and preserves the sampled default", () => {
-    expect(resolveConfig({}).escalateOn).toBe("sampled");
+  it("validates the configured escalation metric and defaults to margin", () => {
+    expect(resolveConfig({}).escalateOn).toBe("margin");
+    expect(
+      resolveConfig({ env: configFromEnv({ DECISION_ESCALATE_ON: "sampled" }) }).escalateOn,
+    ).toBe("sampled");
     expect(
       resolveConfig({ env: configFromEnv({ DECISION_ESCALATE_ON: "entropy" }) }).escalateOn,
     ).toBe("entropy");
     expect(() => configFromEnv({ DECISION_ESCALATE_ON: "unknown" })).toThrow(
       "DECISION_ESCALATE_ON",
     );
+  });
+
+  it("does not escalate a confident distribution under weighted sampling with the default margin metric", async () => {
+    const server = await startFakeSystemOne({ choiceWeights: [0.96, 0.04] });
+    try {
+      const baseConfig = {
+        ...DEFAULT_CONFIG,
+        provider: "systemone",
+        sample: "weighted",
+        minConf: 0.34,
+        days: 1,
+        ticksPerDay: 8,
+      } as const;
+      const provider = new SystemOneProvider({ ...baseConfig, endpoint: server.endpoint });
+
+      // Find a seed where weighted sampling draws a 4% tail branch under sampled escalation
+      let sawTailDraw = false;
+      for (let seed = 1; seed <= 30; seed++) {
+        const marginRun = await new VillageSimulation(
+          { ...baseConfig, seed },
+          provider,
+        ).runAllDays();
+        const sampledRun = await new VillageSimulation(
+          { ...baseConfig, seed, escalateOn: "sampled" },
+          provider,
+        ).runAllDays();
+
+        const tailDecisions = marginRun.decisions.filter((d) => d.confidence < 0.1);
+        if (tailDecisions.length > 0) {
+          sawTailDraw = true;
+          expect(tailDecisions.every((d) => d.escalated === false)).toBe(true);
+          expect(sampledRun.decisions.some((d) => d.confidence < 0.1 && d.escalated)).toBe(true);
+          break;
+        }
+      }
+      expect(sawTailDraw).toBe(true);
+    } finally {
+      await server.close();
+    }
   });
 });

@@ -21,7 +21,14 @@ export interface GatingRule {
   isAllowed: (world: WorldState, entity: Entity) => boolean;
 }
 
-export function findRestockOption(world: WorldState, entity: Entity): RestockOption | null {
+const INNKEEPER_RESTOCK_STEW_LIMIT = 3;
+const INNKEEPER_GOLD_RESERVE = ITEM_PRICES.bread;
+
+export function findRestockOption(
+  world: WorldState,
+  entity: Entity,
+  legacyRestock = false,
+): RestockOption | null {
   const recipe = RECIPES[entity.role];
   if (!recipe) return null;
   const hasInputs = Object.keys(recipe.inputs).length > 0;
@@ -38,6 +45,15 @@ export function findRestockOption(world: WorldState, entity: Entity): RestockOpt
     }
     const price = ITEM_PRICES[item];
     if (entity.gold < price) continue;
+    if (!legacyRestock && entity.role === "innkeeper") {
+      const stewStock = getStock(entity, "stew");
+      if (
+        stewStock >= INNKEEPER_RESTOCK_STEW_LIMIT ||
+        (stewStock >= 1 && entity.gold - price < INNKEEPER_GOLD_RESERVE)
+      ) {
+        continue;
+      }
+    }
     const suppliers = findSuppliersForItem(world, item, entity.id, 1);
     if (suppliers.length > 0) {
       const seller = suppliers[0]!;
@@ -149,6 +165,7 @@ export function getGatedActions(
   world: WorldState,
   entity: Entity,
   legacyHungerOverride = false,
+  legacyRestock = false,
 ): Record<string, string> {
   // Hard survival override (§7.2 & A6)
   if (
@@ -160,7 +177,11 @@ export function getGatedActions(
 
   const criteria: Record<string, string> = {};
   for (const rule of GATING_RULES) {
-    if (rule.isAllowed(world, entity)) {
+    const allowed =
+      rule.action === "restock"
+        ? findRestockOption(world, entity, legacyRestock) !== null
+        : rule.isAllowed(world, entity);
+    if (allowed) {
       criteria[rule.action] = rule.describe(entity);
     }
   }

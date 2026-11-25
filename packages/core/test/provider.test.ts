@@ -2,10 +2,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_CONFIG,
   ReplayProvider,
+  ScriptedProvider,
   SystemOneProvider,
   VillageSimulation,
+  buildTickQuestion,
   configFromEnv,
+  createInitialWorld,
+  getEntityById,
+  recordRumor,
   resolveConfig,
+  type ChoiceQuestion,
   type Question,
 } from "../src/index.ts";
 import { startFakeSystemOne, type FakeSystemOneHandle } from "./fake_systemone.ts";
@@ -382,5 +388,59 @@ describe("System One provider contract, batching, resilience, and config (A2, A5
     expect(resolved.minConf).toBe(0.42);
     expect(resolved.timeoutMs).toBe(45000);
     expect(resolved.apiKey).toBe("tok-123");
+  });
+
+  it("preserves scriptedInstructions across clone/JSON boundaries and strips it on the HTTP wire (#35)", async () => {
+    const world = createInitialWorld(DEFAULT_CONFIG);
+    const anna = getEntityById(world, "anna")!;
+    recordRumor(anna, {
+      id: "shortage:1:dorn:wheat",
+      kind: "shortage",
+      subjectId: "dorn",
+      summary: "dorn is short on wheat",
+      day: 1,
+      tick: 0,
+    });
+    // Make the rumor stale so model instructions omit it while scriptedInstructions retains it
+    world.day = 5;
+
+    const original = buildTickQuestion(world, anna, { work: "bake bread", rest: "rest" }, 0);
+    expect(original.instructions).not.toContain("Heard:");
+    expect(original.scriptedInstructions).toContain("Heard: dorn is short on wheat.");
+
+    const structuredCloned = structuredClone(original);
+    const jsonRoundTripped = JSON.parse(JSON.stringify(original)) as ChoiceQuestion;
+    const spreadCopied: ChoiceQuestion = { ...original };
+
+    expect(structuredCloned.scriptedInstructions).toBe(original.scriptedInstructions);
+    expect(jsonRoundTripped.scriptedInstructions).toBe(original.scriptedInstructions);
+    expect(spreadCopied.scriptedInstructions).toBe(original.scriptedInstructions);
+
+    const scripted = new ScriptedProvider();
+    const baseDecision = await scripted.decide("", { act_anna: original }, 7);
+    const clonedDecision = await scripted.decide("", { act_anna: structuredCloned }, 7);
+    const jsonDecision = await scripted.decide("", { act_anna: jsonRoundTripped }, 7);
+    expect(clonedDecision.answers.act_anna).toEqual(baseDecision.answers.act_anna);
+    expect(jsonDecision.answers.act_anna).toEqual(baseDecision.answers.act_anna);
+
+    // SystemOneProvider strips scriptedInstructions before serializing to the HTTP wire
+    let capturedWireBody: string | undefined;
+    const systemOne = new SystemOneProvider({
+      endpoint: DEFAULT_CONFIG.endpoint,
+      model: DEFAULT_CONFIG.model,
+      timeoutMs: 1000,
+      batch: "never",
+      fetchImpl: async (_url, init) => {
+        capturedWireBody = init?.body as string;
+        return Response.json({ answers: { act_anna: { probabilities: { work: 1 } } } });
+      },
+    });
+    await systemOne.decide("Day 5", { act_anna: original }, 7);
+    expect(capturedWireBody).toBeDefined();
+    const parsedWire = JSON.parse(capturedWireBody!) as {
+      questions: Record<string, Record<string, unknown>>;
+    };
+    expect(parsedWire.questions.act_anna).not.toHaveProperty("scriptedInstructions");
+    expect(parsedWire.questions.act_anna?.instructions).toBe(original.instructions);
   });
 });

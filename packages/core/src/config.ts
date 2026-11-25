@@ -8,7 +8,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   batch: "auto",
   maxBatch: 3,
   sample: "weighted",
-  escalateOn: "sampled",
+  escalateOn: "margin",
   minConf: 0.34,
   rumorMaxAgeDays: 2,
   seed: 7,
