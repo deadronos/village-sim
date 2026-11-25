@@ -61,6 +61,7 @@ export interface SimConfig {
   model: string;
   timeoutMs: number;
   batch: BatchMode;
+  maxBatch: number;
   sample: SampleMode;
   minConf: number;
   apiKey?: string;
@@ -160,6 +161,7 @@ export interface Entity {
   needs: Needs;
   focus: Focus;
   goal: EntityGoal | null;
+  decisionCooldown: number;
   memory: string[];
   rumors: Rumor[];
   affinity: Record<string, number>;
@@ -243,6 +245,7 @@ export interface HeaderLogRecord {
   model: string;
   sample: SampleMode;
   minConf: number;
+  maxBatch?: number;
   days: number;
   ticksPerDay: number;
   minutesPerTick: number;

@@ -79,7 +79,7 @@ export interface LiveServerHandle {
 export async function startVillageServer(options: StartServerOptions): Promise<LiveServerHandle> {
   const host = options.host ?? "127.0.0.1";
   const manager = new LiveSimManager(options.config, {
-    tickMs: options.tickMs ?? 850,
+    tickMs: options.tickMs,
     runsDir: options.runsDir,
   });
 

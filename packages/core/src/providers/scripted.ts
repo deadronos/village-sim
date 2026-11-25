@@ -39,15 +39,22 @@ function normalizeWeights(weights: Record<string, number>): Record<string, numbe
   return probs;
 }
 
-function scoreDawnFocus(instructions: string, criteriaKeys: string[]): Record<string, number> {
+function scoreDawnFocus(
+  instructions: string,
+  stateSummary: string,
+  criteriaKeys: string[],
+): Record<string, number> {
   const gold = parseIntMetric(instructions, "Gold", 15);
   const energy = parseFloatMetric(instructions, "Energy", 0.85);
   const social = parseFloatMetric(instructions, "social", 0.6);
   const isChild = /\bthe child\b/i.test(instructions);
   const isGuard = /\bthe guard\b/i.test(instructions);
-  const isRain = /\brain\b/i.test(instructions);
-  const isThriving = /\bprosperity\s+thriving\b/i.test(instructions);
-  const isLean = /\bprosperity\s+lean\b/i.test(instructions);
+  const isRain = /\brain\b/i.test(stateSummary) || /\brain\b/i.test(instructions);
+  const isThriving =
+    /\bprosperity\s+thriving\b/i.test(stateSummary) ||
+    /\bprosperity\s+thriving\b/i.test(instructions);
+  const isLean =
+    /\bprosperity\s+lean\b/i.test(stateSummary) || /\bprosperity\s+lean\b/i.test(instructions);
 
   const raw: Record<string, number> = {};
   for (const key of criteriaKeys) {
@@ -82,8 +89,9 @@ function scoreTickAction(
   const hunger = parseFloatMetric(instructions, "Hunger", 0.3);
   const energy = parseFloatMetric(instructions, "energy", 0.8);
   const social = parseFloatMetric(instructions, "social", 0.6);
-  const mealsToday = parseIntMetric(instructions, "Meals today:", 0);
-  const focusMatch = /Today's focus:\s*([a-z]+)/i.exec(instructions);
+  const mealsMatch = /(?:Meals today:|meals)\s+([0-9]+)/i.exec(instructions);
+  const mealsToday = mealsMatch?.[1] ? Number.parseInt(mealsMatch[1], 10) : 0;
+  const focusMatch = /(?:Today's\s+)?focus:\s*([a-z]+)/i.exec(instructions);
   const focus = focusMatch?.[1]?.toLowerCase() ?? "duty";
   const carryingBread = /\b[1-9]\d*\s+bread\b/i.test(instructions);
   const carryingStew = /\b[1-9]\d*\s+stew\b/i.test(instructions);
@@ -91,7 +99,8 @@ function scoreTickAction(
   const isBaker = /\bthe baker\b/i.test(instructions);
   const isFarmer = /\bthe farmer\b/i.test(instructions);
   const isInnkeeper = /\bthe innkeeper\b/i.test(instructions);
-  const isRain = /\bweather\s+rain\b/i.test(instructions);
+  const isRain =
+    /\bweather\s+rain\b/i.test(stateSummary) || /\bweather\s+rain\b/i.test(instructions);
   const isThriving = /\bprosperity\s+thriving\b/i.test(stateSummary);
   const heardShortage = /\bHeard:.*\b(?:short|low)\b/i.test(instructions);
 
@@ -194,7 +203,7 @@ export class ScriptedProvider implements DecisionProvider {
         const keys = Object.keys(question.criteria).toSorted();
         const isDawn = qId.startsWith("dawn_");
         const probabilities = isDawn
-          ? scoreDawnFocus(question.instructions, keys)
+          ? scoreDawnFocus(question.instructions, stateSummary, keys)
           : scoreTickAction(question.instructions, stateSummary, keys);
 
         let bestChoice = keys[0] ?? "";

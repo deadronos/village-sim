@@ -151,6 +151,7 @@ export function hashWorldState(world: WorldState): string {
       needs: e.needs,
       focus: e.focus,
       goal: e.goal,
+      decisionCooldown: e.decisionCooldown,
       memory: e.memory,
       rumors: e.rumors,
       affinity: e.affinity,

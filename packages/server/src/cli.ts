@@ -31,6 +31,7 @@ Options (CLI > env > village.config.json > defaults):
   --endpoint <url>      System One endpoint (env: DECISION_ENDPOINT)
   --model <name>        Model alias (env: DECISION_MODEL)
   --batch <mode>        auto | always | never (env: DECISION_BATCH)
+  --max-batch <n>       Max entities decided per tick (env: DECISION_MAX_BATCH, default: ${DEFAULT_CONFIG.maxBatch})
   --sample <mode>       weighted | argmax (env: DECISION_SAMPLE)
   --min-conf <0..1>     Escalation threshold (env: DECISION_MIN_CONF)
   --timeout-ms <ms>     Request timeout (env: DECISION_TIMEOUT_MS)
@@ -111,6 +112,7 @@ async function cmdReplay(
       days: parsed.header.days,
       sample: parsed.header.sample,
       minConf: parsed.header.minConf,
+      maxBatch: parsed.header.maxBatch ?? DEFAULT_CONFIG.maxBatch,
       ticksPerDay: parsed.header.ticksPerDay,
       minutesPerTick: parsed.header.minutesPerTick,
       provider: "replay",
@@ -172,7 +174,8 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<number
     typeof flags.port === "string"
       ? Number.parseInt(flags.port, 10)
       : Number.parseInt(process.env.PORT ?? "4173", 10);
-  const tickMs = typeof flags["tick-ms"] === "string" ? Number.parseInt(flags["tick-ms"], 10) : 850;
+  const tickMs =
+    typeof flags["tick-ms"] === "string" ? Number.parseInt(flags["tick-ms"], 10) : undefined;
   const autostart = flags.paused !== true;
 
   const handle = await startVillageServer({
@@ -183,9 +186,10 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<number
     runsDir: join(process.cwd(), "runs"),
   });
 
+  const status = handle.manager.getStatus();
   console.log(`[village] Live simulation backend listening on ${handle.url}`);
   console.log(
-    `[village] Provider: ${config.provider} | Seed: ${config.seed} | Days: ${config.days} | Tick interval: ${tickMs}ms`,
+    `[village] Provider: ${config.provider} | Seed: ${config.seed} | Days: ${config.days} | Tick interval: ${status.tickMs}ms (maxBatch=${config.maxBatch})`,
   );
 
   // Keep alive until interrupted
