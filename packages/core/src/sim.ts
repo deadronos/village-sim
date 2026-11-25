@@ -236,7 +236,9 @@ export class VillageSimulation {
       const providerAns = res.answers[qId];
       const fallbackAns = scriptedBackup.answers[qId]!;
 
-      let usedFallback = Boolean(res.meta.fallbackUsed) || !providerAns;
+      let usedFallback =
+        !providerAns ||
+        (res.meta.fallbackQuestionIds?.includes(qId) ?? Boolean(res.meta.fallbackUsed));
       let probs = providerAns?.probabilities ?? fallbackAns.probabilities;
       if (Object.keys(probs).length === 0) {
         usedFallback = true;
@@ -857,7 +859,9 @@ export class VillageSimulation {
         const fallbackAns = scriptedBackup.answers[qId]!;
 
         // Deterministic validation: keep only probabilities for gated criteria keys
-        let usedFallback = Boolean(res.meta.fallbackUsed) || !providerAns;
+        let usedFallback =
+          !providerAns ||
+          (res.meta.fallbackQuestionIds?.includes(qId) ?? Boolean(res.meta.fallbackUsed));
         const filteredProbs: Record<string, number> = {};
         if (!usedFallback && providerAns) {
           let sum = 0;

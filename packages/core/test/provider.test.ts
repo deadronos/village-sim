@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_CONFIG,
+  ReplayProvider,
   SystemOneProvider,
   VillageSimulation,
   configFromEnv,
   resolveConfig,
+  type Question,
 } from "../src/index.ts";
 import { startFakeSystemOne, type FakeSystemOneHandle } from "./fake_systemone.ts";
 
@@ -17,6 +19,102 @@ describe("System One provider contract, batching, resilience, and config (A2, A5
       server = null;
     }
   });
+
+  it.each([0.99, 5])(
+    "derives choice and confidence from normalized probabilities when the provider claims %s",
+    async (confidence) => {
+      const provider = new SystemOneProvider({
+        endpoint: DEFAULT_CONFIG.endpoint,
+        model: DEFAULT_CONFIG.model,
+        timeoutMs: 1000,
+        batch: "never",
+        fetchImpl: async () =>
+          Response.json({
+            answers: {
+              act_anna: {
+                choice: "rest",
+                probabilities: { work: 9, rest: 1, invalid: 50 },
+                confidence,
+              },
+            },
+          }),
+      });
+
+      const result = await provider.decide(
+        "",
+        { act_anna: { type: "choice", instructions: "", criteria: { work: "", rest: "" } } },
+        7,
+      );
+      expect(result.answers.act_anna).toEqual({
+        type: "choice",
+        choice: "work",
+        probabilities: { work: 0.9, rest: 0.1 },
+        confidence: 0.9,
+      });
+    },
+  );
+
+  it.each(["never", "always", "retry"] as const)(
+    "counts only failed questions as fallback and replays mixed decisions (%s)",
+    async (mode) => {
+      const provider = new SystemOneProvider({
+        endpoint: DEFAULT_CONFIG.endpoint,
+        model: DEFAULT_CONFIG.model,
+        timeoutMs: 1000,
+        batch: mode === "retry" ? "auto" : mode,
+        retryBaseMs: 0,
+        fetchImpl: async (_url, init) => {
+          const { questions } = JSON.parse(init?.body as string) as {
+            questions: Record<string, Question>;
+          };
+          const ids = Object.keys(questions);
+          if (
+            (mode === "retry" && ids.length > 1) ||
+            (mode !== "always" && ids[0]?.endsWith("_anna"))
+          ) {
+            return new Response(null, { status: 503 });
+          }
+          const answers = Object.fromEntries(
+            Object.entries(questions).map(([id, question]) => {
+              if (id.endsWith("_anna")) return [id, { probabilities: {} }];
+              const keys = Object.keys(question.criteria);
+              const choice = keys.includes("rest") ? "rest" : keys[0]!;
+              return [id, { probabilities: { [choice]: 1 } }];
+            }),
+          );
+          return Response.json({ answers });
+        },
+      });
+
+      const question = { type: "choice", instructions: "", criteria: { rest: "" } } as const;
+      const result = await provider.decide("", { act_anna: question, act_bram: question }, 7);
+      expect(result.meta.fallbackUsed).toBe(true);
+      expect(result.meta.fallbackQuestionIds).toEqual(["act_anna"]);
+      expect(result.meta.provider).toBe("systemone");
+      expect(Object.keys(result.answers)).toEqual(["act_bram"]);
+
+      const config = { ...DEFAULT_CONFIG, provider: "systemone", days: 1, ticksPerDay: 3 } as const;
+      const run = await new VillageSimulation(config, provider).runAllDays();
+      for (const prefix of ["dawn", "act"]) {
+        const action = prefix === "dawn" ? "rest" : "work";
+        expect(
+          run.decisions.find((decision) => decision.question_id === `${prefix}_anna`),
+        ).toMatchObject({ fallback: true, provider: "scripted" });
+        expect(
+          run.decisions.find((decision) => decision.question_id === `${prefix}_bram`),
+        ).toMatchObject({ provider: "systemone", action, probabilities: { [action]: 1 } });
+      }
+      const fallbacks = run.decisions.filter((decision) => decision.fallback);
+      expect(fallbacks.every((decision) => decision.entity === "anna")).toBe(true);
+      expect(run.summaries[0]?.fallbackDecisions).toBe(fallbacks.length);
+
+      const replay = await new VillageSimulation(
+        { ...config, provider: "replay" },
+        new ReplayProvider(run.decisions),
+      ).runAllDays();
+      expect(replay.tickHashes).toEqual(run.tickHashes);
+    },
+  );
 
   it("passes health check and answers >=95% of decisions in a full day run (A2)", async () => {
     server = await startFakeSystemOne({ authToken: "secret-key", latencyMs: 12 });
