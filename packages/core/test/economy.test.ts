@@ -2,14 +2,17 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CONFIG,
   ITEM_CAPS,
+  RECIPES,
   ScriptedProvider,
   VillageSimulation,
   assertWorldInvariants,
   canonicalJson,
+  computeWealthMetrics,
   createInitialWorld,
   decayNeeds,
   executeRecipe,
   executeTrade,
+  formatDaySummaryTable,
   getEntityById,
   getStock,
   hashWorldState,
@@ -127,5 +130,102 @@ describe("Economy, recipes, caps, and invariants", () => {
     }
 
     expect(totalTicks).toBeGreaterThanOrEqual(1000);
+  });
+
+  it("computes Gini coefficient and max/min ratio accurately", () => {
+    expect(computeWealthMetrics([])).toMatchObject({ gini: 0, maxMinRatio: 1 });
+    expect(computeWealthMetrics([20, 20, 20, 20])).toMatchObject({
+      gini: 0,
+      maxMinRatio: 1,
+      minGold: 20,
+      maxGold: 20,
+      totalGold: 80,
+    });
+    expect(computeWealthMetrics([0, 0, 0, 100])).toMatchObject({
+      gini: 0.75,
+      maxMinRatio: 100,
+      minGold: 0,
+      maxGold: 100,
+      totalGold: 100,
+    });
+  });
+
+  it("consumes tools in farmer harvests and sustains real P2P tool trades from the smith", async () => {
+    const world = createInitialWorld(DEFAULT_CONFIG);
+    const dorn = getEntityById(world, "dorn")!;
+    dorn.location = "fields";
+    setStock(dorn, "wheat", 2);
+    setStock(dorn, "tool", 0);
+
+    // Without a tool, farmer cannot harvest
+    expect(executeRecipe(world, dorn)).toMatchObject({
+      ok: false,
+      producedQty: 0,
+      reason: "missing_inputs",
+    });
+
+    // With a tool, farmer consumes 1 tool to harvest 3 wheat
+    setStock(dorn, "tool", 1);
+    const harvested = executeRecipe(world, dorn);
+    expect(harvested.ok).toBe(true);
+    expect(harvested.producedQty).toBe(3);
+    expect(getStock(dorn, "tool")).toBe(0);
+    expect(getStock(dorn, "wheat")).toBe(5);
+
+    // Multi-day run must include real P2P tool trades from Torin to Dorn
+    const sim = new VillageSimulation(
+      { ...DEFAULT_CONFIG, seed: 7, days: 3, provider: "scripted" },
+      new ScriptedProvider(),
+    );
+    const result = await sim.runAllDays();
+    const toolTrades = result.events.filter(
+      (e) =>
+        e.kind === "trade" &&
+        e.item === "tool" &&
+        e.otherEntityId === "torin" &&
+        e.entityId === "dorn",
+    );
+    expect(toolTrades.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("maintains healthy trade volume, wealth spread, and avoids consecutive 0g days with unsold stock", async () => {
+    const seeds = [7, 19, 42, 101];
+
+    for (const seed of seeds) {
+      const sim = new VillageSimulation(
+        { ...DEFAULT_CONFIG, seed, days: 3, provider: "scripted" },
+        new ScriptedProvider(),
+      );
+      const result = await sim.runAllDays();
+
+      const prevZeroStocked = new Set<string>();
+      for (const day of result.summaries) {
+        expect(day.trades).toBeGreaterThanOrEqual(8);
+        expect(day.trades).toBeLessThanOrEqual(50);
+        expect(day.breadProduced).toBeGreaterThanOrEqual(4);
+        expect(day.minMealsPerEntity).toBeGreaterThanOrEqual(2);
+        expect(day.mealsTotal).toBeLessThanOrEqual(28);
+        expect(day.wealthGini).toBeLessThan(0.4);
+
+        const table = formatDaySummaryTable(day);
+        expect(table).toContain(`Wealth: Gini ${day.wealthGini.toFixed(3)}`);
+
+        const currentZeroStocked = new Set<string>();
+        for (const entity of day.entities) {
+          const recipe = RECIPES[entity.role];
+          if (!recipe) continue;
+          const outputStock = entity.stock[recipe.output] ?? 0;
+          if (entity.gold === 0 && outputStock > 0) {
+            expect(
+              prevZeroStocked.has(entity.id),
+              `seed ${seed} day ${day.day}: ${entity.id} ended consecutive days at 0g holding ${recipe.output}:${outputStock}`,
+            ).toBe(false);
+            currentZeroStocked.add(entity.id);
+          }
+        }
+        prevZeroStocked.clear();
+        for (const id of currentZeroStocked) prevZeroStocked.add(id);
+      }
+    }
   });
 });
