@@ -189,6 +189,49 @@ describe("Economy, recipes, caps, and invariants", () => {
     expect(toolTrades.length).toBeGreaterThanOrEqual(3);
   });
 
+  it.each(Array.from({ length: 50 }, (_, seed) => seed))(
+    "sustains the scripted economy for seven days (seed %i)",
+    async (seed) => {
+      const days = 7;
+      const sim = new VillageSimulation(
+        { ...DEFAULT_CONFIG, seed, days, provider: "scripted" },
+        new ScriptedProvider(),
+      );
+      // The simulation checks world invariants on every tick and throws on failure.
+      const { summaries, tickHashes } = await sim.runAllDays().catch((cause: unknown) => {
+        throw new Error(`Seed ${seed}, day ${sim.world.day}, tick ${sim.world.tick} failed`, {
+          cause,
+        });
+      });
+      expect(summaries, "completed days").toHaveLength(days);
+      expect(tickHashes, "completed ticks").toHaveLength(days * DEFAULT_CONFIG.ticksPerDay);
+
+      for (const day of summaries) {
+        const context = `seed ${seed}, day ${day.day}`;
+        const underfed = day.entities.filter((entity) => entity.meals < 2);
+        expect(
+          day.minMealsPerEntity,
+          `${context}: meals below 2 for ${underfed.map((entity) => `${entity.id} (${entity.meals})`).join(", ")}`,
+        ).toBeGreaterThanOrEqual(2);
+        expect(day.trades, `${context}: trades`).toBeGreaterThanOrEqual(8);
+        expect(day.breadProduced, `${context}: bread produced`).toBeGreaterThanOrEqual(4);
+        expect(day.wealthGini, `${context}: wealth Gini`).toBeGreaterThanOrEqual(0);
+        expect(day.wealthGini, `${context}: wealth Gini`).toBeLessThanOrEqual(0.45);
+        expect(day.fallbackDecisions, `${context}: unexpected fallback decisions`).toBe(0);
+
+        const stockedAtZeroGold = day.entities.flatMap((entity) => {
+          const output = RECIPES[entity.role]?.output;
+          const stock = output ? (entity.stock[output] ?? 0) : 0;
+          return entity.gold === 0 && stock > 0 ? [`${entity.id} (${stock} ${output})`] : [];
+        });
+        expect(
+          stockedAtZeroGold.length,
+          `${context}: villagers at 0g with stock to sell: ${stockedAtZeroGold.join(", ")}`,
+        ).toBeLessThanOrEqual(1);
+      }
+    },
+  );
+
   it("maintains healthy trade volume, wealth spread, and avoids consecutive 0g days with unsold stock", async () => {
     const seeds = [7, 19, 42, 101];
 
