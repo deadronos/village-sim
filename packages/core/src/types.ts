@@ -261,6 +261,7 @@ export type JsonlRecord = HeaderLogRecord | DecisionLogRecord | TickHashRecord;
 export interface DaySummary {
   day: number;
   weather: Weather;
+  provider: ProviderKind;
   trades: number;
   breadProduced: number;
   stewProduced: number;

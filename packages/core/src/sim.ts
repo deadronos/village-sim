@@ -195,8 +195,17 @@ export class VillageSimulation {
         chosenFocus = (fallbackAns.choice as Focus) ?? "duty";
       }
 
-      // Confidence escalation on dawn plan if below threshold
-      if (!usedFallback && sampled.prob < this.config.minConf) {
+      // Confidence escalation on dawn plan if below threshold (not applicable for scripted provider)
+      const dawnReplayRec =
+        this.provider instanceof ReplayProvider
+          ? this.provider.getRecord(world.day, -1, qId)
+          : undefined;
+      const isScriptedDawn =
+        this.config.provider === "scripted" ||
+        res.meta.provider === "scripted" ||
+        dawnReplayRec?.provider === "scripted";
+
+      if (!usedFallback && !isScriptedDawn && sampled.prob < this.config.minConf) {
         escalated = true;
         const escSample =
           this.config.sample === "argmax"
@@ -805,8 +814,17 @@ export class VillageSimulation {
         let chosenAction = sampled.key as ActionKind;
         let escalated = false;
 
-        // Confidence escalation (§7.3)
-        if (!usedFallback && sampled.prob < this.config.minConf) {
+        // Confidence escalation (§7.3 — not applicable for scripted provider)
+        const tickReplayRec =
+          this.provider instanceof ReplayProvider
+            ? this.provider.getRecord(world.day, world.tick, qId)
+            : undefined;
+        const isScriptedTick =
+          this.config.provider === "scripted" ||
+          res.meta.provider === "scripted" ||
+          tickReplayRec?.provider === "scripted";
+
+        if (!usedFallback && !isScriptedTick && sampled.prob < this.config.minConf) {
           escalated = true;
           const escRng = createStreamRng(world.seed, world.day, world.tick, entity.id, "act_esc");
           const escSample =
@@ -921,6 +939,7 @@ export class VillageSimulation {
       daySummary = {
         day: world.day,
         weather: world.weather,
+        provider: this.config.provider,
         trades: world.tradesToday,
         breadProduced: world.breadProducedToday,
         stewProduced: world.stewProducedToday,

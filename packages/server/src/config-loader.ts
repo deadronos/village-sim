@@ -54,10 +54,24 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
   };
 }
 
-export function loadConfigFile(configPath?: string): PartialSimConfig {
+export function getInvocationCwd(env: Record<string, string | undefined> = process.env): string {
+  return env.INIT_CWD && env.INIT_CWD.trim().length > 0 ? env.INIT_CWD : process.cwd();
+}
+
+export function resolveFromInvocationCwd(
+  targetPath: string,
+  env: Record<string, string | undefined> = process.env,
+): string {
+  return resolve(getInvocationCwd(env), targetPath);
+}
+
+export function loadConfigFile(
+  configPath?: string,
+  env: Record<string, string | undefined> = process.env,
+): PartialSimConfig {
   const candidate = configPath
-    ? resolve(configPath)
-    : resolve(process.cwd(), "village.config.json");
+    ? resolveFromInvocationCwd(configPath, env)
+    : resolveFromInvocationCwd("village.config.json", env);
   if (!existsSync(candidate)) return {};
   const raw = readFileSync(candidate, "utf8");
   return JSON.parse(raw) as PartialSimConfig;
@@ -124,7 +138,7 @@ export function buildResolvedConfig(
   flags: Record<string, string | boolean>,
   env: Record<string, string | undefined> = process.env,
 ): SimConfig {
-  const fileConfig = loadConfigFile(stringFlag(flags, "config"));
+  const fileConfig = loadConfigFile(stringFlag(flags, "config"), env);
   const envConfig = configFromEnv(env);
   const cliConfig = configFromFlags(flags);
   return resolveConfig({ file: fileConfig, env: envConfig, cli: cliConfig });
@@ -133,6 +147,7 @@ export function buildResolvedConfig(
 export function createProviderForConfig(
   config: SimConfig,
   onWarning?: (msg: string) => void,
+  env: Record<string, string | undefined> = process.env,
 ): DecisionProvider {
   switch (config.provider) {
     case "scripted":
@@ -156,7 +171,9 @@ export function createProviderForConfig(
           "DECISION_PROVIDER=replay requires --replay <path> or replayPath in config",
         );
       }
-      const parsed = parseJsonl(readFileSync(resolve(config.replayPath), "utf8"));
+      const parsed = parseJsonl(
+        readFileSync(resolveFromInvocationCwd(config.replayPath, env), "utf8"),
+      );
       return new ReplayProvider(parsed.decisions);
     }
   }

@@ -5,6 +5,7 @@ import {
   ScriptedProvider,
   VillageSimulation,
   explainLastDecision,
+  formatDaySummaryTable,
   formatExplainReport,
   parseJsonl,
   serializeJsonl,
@@ -105,5 +106,23 @@ describe("Determinism, living economy, replay, and auditability (A1, A3, A4, A7,
     expect(report).toContain("anna the baker");
     expect(report).toContain("Probability Distribution:");
     expect(report).toContain("<-- chosen");
+  });
+
+  it("does not escalate decisions for scripted runs and formats Escalated as n/a (scripted)", async () => {
+    const sim = new VillageSimulation(
+      { ...DEFAULT_CONFIG, seed: 7, days: 2, provider: "scripted" },
+      new ScriptedProvider(),
+    );
+    const result = await sim.runAllDays();
+
+    expect(result.decisions.length).toBeGreaterThan(0);
+    expect(result.decisions.every((d) => d.escalated === false)).toBe(true);
+
+    for (const summary of result.summaries) {
+      expect(summary.provider).toBe("scripted");
+      expect(summary.escalatedDecisions).toBe(0);
+      const table = formatDaySummaryTable(summary);
+      expect(table).toContain("Escalated: n/a (scripted)");
+    }
   });
 });

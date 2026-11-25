@@ -1,9 +1,15 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "@village/core";
-import { runCli, startVillageServer, type LiveServerHandle } from "../src/index.ts";
+import {
+  getInvocationCwd,
+  resolveFromInvocationCwd,
+  runCli,
+  startVillageServer,
+  type LiveServerHandle,
+} from "../src/index.ts";
 
 describe("CLI and live backend server", () => {
   let server: LiveServerHandle | null = null;
@@ -76,5 +82,55 @@ describe("CLI and live backend server", () => {
     expect(explainRes.ok).toBe(true);
     const explainJson = (await explainRes.json()) as { report: string };
     expect(explainJson.report).toContain("anna");
+  });
+
+  it("resolves default and relative CLI paths against INIT_CWD without doubling workspace dirs", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-init-cwd-"));
+    const prevInitCwd = process.env.INIT_CWD;
+    process.env.INIT_CWD = tempDir;
+
+    try {
+      expect(getInvocationCwd()).toBe(tempDir);
+      expect(resolveFromInvocationCwd("runs/seed-7.jsonl")).toBe(
+        resolve(tempDir, "runs/seed-7.jsonl"),
+      );
+      expect(resolveFromInvocationCwd("packages/server/runs/seed-7.jsonl")).toBe(
+        resolve(tempDir, "packages/server/runs/seed-7.jsonl"),
+      );
+
+      const absPath = resolve(tempDir, "abs/custom.jsonl");
+      expect(resolveFromInvocationCwd(absPath)).toBe(absPath);
+
+      const runCode = await runCli([
+        "run",
+        "--seed",
+        "7",
+        "--days",
+        "1",
+        "--provider",
+        "scripted",
+        "--quiet",
+      ]);
+      expect(runCode).toBe(0);
+      expect(existsSync(join(tempDir, "runs", "seed-7.jsonl"))).toBe(true);
+
+      const replayCode = await runCli(["replay", "runs/seed-7.jsonl", "--quiet"]);
+      expect(replayCode).toBe(0);
+
+      const explainCode = await runCli([
+        "explain",
+        "--run",
+        "runs/seed-7.jsonl",
+        "--entity",
+        "anna",
+      ]);
+      expect(explainCode).toBe(0);
+    } finally {
+      if (prevInitCwd === undefined) {
+        delete process.env.INIT_CWD;
+      } else {
+        process.env.INIT_CWD = prevInitCwd;
+      }
+    }
   });
 });
