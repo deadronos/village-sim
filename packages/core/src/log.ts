@@ -102,11 +102,13 @@ function formatStockCompact(stock: Partial<Record<ItemKind, number>>): string {
 }
 
 export function formatDaySummaryTable(summary: DaySummary): string {
+  const escalatedLabel =
+    summary.provider === "scripted" ? "n/a (scripted)" : String(summary.escalatedDecisions);
   const lines: string[] = [
     ``,
     `--- End of Day ${summary.day} (${summary.weather}) ---`,
     `Trades: ${summary.trades} | Bread: ${summary.breadProduced} | Stew: ${summary.stewProduced} | Meals: ${summary.mealsTotal} (min/entity: ${summary.minMealsPerEntity})`,
-    `Provider calls: ${summary.providerCalls} | Latency p50/p95: ${summary.p50LatencyMs}ms / ${summary.p95LatencyMs}ms | Fallback: ${(summary.fallbackRate * 100).toFixed(1)}% | Escalated: ${summary.escalatedDecisions}`,
+    `Provider calls: ${summary.providerCalls} | Latency p50/p95: ${summary.p50LatencyMs}ms / ${summary.p95LatencyMs}ms | Fallback: ${(summary.fallbackRate * 100).toFixed(1)}% | Escalated: ${escalatedLabel}`,
     `Final Hash: ${summary.finalStateHash.slice(0, 16)}...`,
     ``,
     `${"Entity".padEnd(10)} ${"Role".padEnd(11)} ${"Gold".padStart(5)} ${"Meals".padStart(6)}  Stock`,

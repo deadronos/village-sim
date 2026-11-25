@@ -25,6 +25,7 @@ Open **http://localhost:5173** to watch the low-poly village live, click any vil
 
 ```bash
 # Run 3 simulated days offline with the zero-dependency scripted provider
+# (writes runs/seed-7.jsonl relative to your current directory; override with --out)
 pnpm village run --seed 7 --days 3 --provider scripted
 
 # Run against a local System One endpoint (e.g. Kev / Jev)
