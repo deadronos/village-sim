@@ -128,7 +128,6 @@ export function sha256Hex(input: string): string {
  */
 export function hashWorldState(world: WorldState): string {
   const canonical = {
-    nondeterministicProbe: Math.random(),
     seed: world.seed,
     day: world.day,
     tick: world.tick,
