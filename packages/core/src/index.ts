@@ -6,6 +6,7 @@ export * from "./places.ts";
 export * from "./world.ts";
 export * from "./economy.ts";
 export * from "./gating.ts";
+export * from "./gossip.ts";
 export * from "./serializer.ts";
 export * from "./log.ts";
 export * from "./sim.ts";

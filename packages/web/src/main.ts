@@ -23,6 +23,9 @@ const hud = new VillageHud({
   onToggleBubbles: (enabled) => {
     scene?.setBubblesEnabled(enabled);
   },
+  onToggleGraph: (enabled) => {
+    scene?.setGraphEnabled(enabled);
+  },
   onSelectEntity: (entityId) => {
     scene?.setSelectedEntity(entityId);
     hud.selectEntity(entityId, true);

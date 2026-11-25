@@ -197,6 +197,7 @@ export function createInitialWorld(
       focus: "duty",
       goal: null,
       memory: [],
+      rumors: [],
       affinity,
       mealsToday: 0,
       tradesToday: 0,
@@ -213,6 +214,8 @@ export function createInitialWorld(
     ticksPerDay: config.ticksPerDay,
     startHour: config.startHour,
     weather: pickWeatherForDay(config.seed, 1),
+    prosperity: "steady",
+    prosperityScore: 0.55,
     entities,
     initialTotalGold,
     totalGoldMinted: 0,
@@ -259,6 +262,7 @@ export function cloneEntitiesForSnapshot(entities: Entity[]): Entity[] {
     needs: { ...e.needs },
     goal: e.goal ? { ...e.goal, route: [...e.goal.route] } : null,
     memory: [...e.memory],
+    rumors: e.rumors.map((r) => ({ ...r })),
     affinity: { ...e.affinity },
     lastDecision: e.lastDecision
       ? {

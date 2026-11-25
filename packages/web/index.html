@@ -23,6 +23,9 @@
           <span id="clock-day" class="clock-day">Day 1</span>
           <span id="clock-time" class="clock-time">06:00</span>
           <span id="weather-pill" class="pill">clear</span>
+          <span id="prosperity-pill" class="pill pill-steady" title="Village prosperity"
+            >steady</span
+          >
         </div>
 
         <div class="controls-group">
@@ -55,6 +58,15 @@
             title="Toggle 3D speech and trade bubbles"
           >
             Bubbles
+          </button>
+          <button
+            id="btn-graph"
+            class="btn btn-toggle"
+            type="button"
+            aria-pressed="false"
+            title="Toggle 3D villager relationship arcs"
+          >
+            Graph
           </button>
           <button
             id="btn-settings"
@@ -186,6 +198,16 @@
                 <span id="insp-provider" class="pill">scripted</span>
               </div>
               <div id="insp-probs" class="prob-list"></div>
+            </div>
+
+            <div class="section-block">
+              <h3>Relationships</h3>
+              <div id="insp-bonds" class="bond-list"></div>
+            </div>
+
+            <div class="section-block">
+              <h3>Heard Rumors</h3>
+              <ul id="insp-rumors" class="rumor-list"></ul>
             </div>
 
             <div class="section-block">

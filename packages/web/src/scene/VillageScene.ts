@@ -4,6 +4,7 @@ import * as THREE from "three/webgpu";
 import { createVillageAtmosphere, type AtmosphereController } from "./atmosphere.ts";
 import { SpeechBubbleLayer } from "./bubbles.ts";
 import { buildVillageBuildings, type AnimatedBuildings } from "./buildings.ts";
+import { RelationshipGraphLayer } from "./gossipGraph.ts";
 import { buildVillageTerrain } from "./terrain.ts";
 import { VillagerLayer } from "./villagers.ts";
 
@@ -23,6 +24,7 @@ export class VillageScene {
   private readonly buildings: AnimatedBuildings;
   private readonly villagers: VillagerLayer;
   private readonly bubbles: SpeechBubbleLayer;
+  private readonly graph: RelationshipGraphLayer;
   private readonly atmosphere: AtmosphereController;
   private readonly raycaster = new THREE.Raycaster();
   private readonly pointer = new THREE.Vector2();
@@ -77,6 +79,8 @@ export class VillageScene {
     this.scene.add(this.villagers.group);
     this.bubbles = new SpeechBubbleLayer(options.places);
     this.scene.add(this.bubbles.group);
+    this.graph = new RelationshipGraphLayer();
+    this.scene.add(this.graph.group);
 
     this.bindEvents();
   }
@@ -144,14 +148,20 @@ export class VillageScene {
     this.bubbles.spawnFromEvents(events, entities, weather, (id) =>
       this.villagers.getEntityWorldPosition(id),
     );
+    this.graph.sync(entities, events, (id) => this.villagers.getEntityWorldPosition(id));
   }
 
   setBubblesEnabled(enabled: boolean): void {
     this.bubbles.setEnabled(enabled);
   }
 
+  setGraphEnabled(enabled: boolean): void {
+    this.graph.setGraphVisible(enabled);
+  }
+
   clearBubbles(): void {
     this.bubbles.clearAll();
+    this.graph.clearPulses();
   }
 
   setSelectedEntity(entityId: string | null): void {
@@ -186,6 +196,7 @@ export class VillageScene {
       this.buildings.update(dt, this.elapsed, this.atmosphere.duskFactor, this.weather);
       this.villagers.update(dt, this.elapsed);
       this.bubbles.update(dt, (id) => this.villagers.getEntityWorldPosition(id));
+      this.graph.update(dt, (id) => this.villagers.getEntityWorldPosition(id));
 
       void this.renderer.renderAsync(this.scene, this.camera);
     };
@@ -201,6 +212,7 @@ export class VillageScene {
     this.renderer.domElement.removeEventListener("pointerdown", this.handlePointerDown);
     this.renderer.domElement.removeEventListener("pointerup", this.handlePointerUp);
     this.bubbles.dispose();
+    this.graph.dispose();
     this.controls.dispose();
     this.renderer.dispose();
   }

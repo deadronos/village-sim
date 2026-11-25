@@ -1,4 +1,5 @@
 import { RECIPES, findSuppliersForItem } from "./economy.ts";
+import { getTopBonds, getTopRumor } from "./gossip.ts";
 import type { ChoiceQuestion, Entity, Focus, ItemKind, WorldState } from "./types.ts";
 import { formatSimTime, getStock } from "./world.ts";
 
@@ -41,7 +42,7 @@ export function serializeWorldState(world: WorldState): string {
   );
 
   return (
-    `Day ${world.day}, ${time}, weather ${world.weather}. ` +
+    `Day ${world.day}, ${time}, weather ${world.weather}, prosperity ${world.prosperity}. ` +
     `Village stocks: wheat ${wheatSupply}, bread ${breadSupply}, stew ${stewSupply}, wood ${woodSupply}. ` +
     `Places: well, market, bakery, tavern, smithy, fields, woods, garden.`
   );
@@ -68,6 +69,15 @@ export function serializeEntityInstruction(world: WorldState, entity: Entity): s
     }
   }
 
+  const topBond = getTopBonds(world, entity, 1)[0];
+  const bondHint =
+    topBond && (topBond.tier === "warm" || topBond.tier === "close")
+      ? ` Closest: ${topBond.entity.name.toLowerCase()} (${topBond.tier}).`
+      : "";
+
+  const topRumor = getTopRumor(entity);
+  const rumorHint = topRumor ? ` Heard: ${topRumor.summary}.` : "";
+
   return (
     `${entity.name.toLowerCase()} the ${entity.role}, at ${entity.location}. ` +
     `Gold ${entity.gold}g, carrying ${carrying}.${supplyHint} ` +
@@ -76,8 +86,8 @@ export function serializeEntityInstruction(world: WorldState, entity: Entity): s
     `Meals today: ${entity.mealsToday}. ` +
     `The village relies on ${entity.name.toLowerCase()} to ${entity.duty}. ` +
     `Today's focus: ${entity.focus}. ` +
-    `Recent: ${recent}. ` +
-    `It is ${time}, weather ${world.weather}.`
+    `Recent: ${recent}.${bondHint}${rumorHint} ` +
+    `It is ${time}, weather ${world.weather}, prosperity ${world.prosperity}.`
   );
 }
 
@@ -96,14 +106,16 @@ export function buildTickQuestion(
 export function buildDawnQuestion(world: WorldState, entity: Entity): ChoiceQuestion {
   const carrying = formatInventory(entity.inventory);
   const recent = entity.memory.length > 0 ? entity.memory.join("; ") : "fresh dawn";
+  const topRumor = getTopRumor(entity);
+  const rumorHint = topRumor ? ` Heard: ${topRumor.summary}.` : "";
   return {
     type: "choice",
     instructions:
-      `Dawn of Day ${world.day} (${world.weather}). ` +
+      `Dawn of Day ${world.day} (${world.weather}, prosperity ${world.prosperity}). ` +
       `${entity.name.toLowerCase()} the ${entity.role} wakes at ${entity.home}. ` +
       `Gold ${entity.gold}g, carrying ${carrying}. ` +
       `Energy ${entity.needs.energy.toFixed(2)}, social ${entity.needs.social.toFixed(2)}. ` +
-      `Duty: ${entity.duty}. Recent: ${recent}. Choose today's focus.`,
+      `Duty: ${entity.duty}. Recent: ${recent}.${rumorHint} Choose today's focus.`,
     criteria: { ...DAWN_FOCUS_CRITERIA },
   };
 }
