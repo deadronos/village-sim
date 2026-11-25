@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { parseEnv } from "node:util";
 import {
   ReplayProvider,
   ScriptedProvider,
@@ -63,6 +64,67 @@ export function resolveFromInvocationCwd(
   env: Record<string, string | undefined> = process.env,
 ): string {
   return resolve(getInvocationCwd(env), targetPath);
+}
+
+function hasEnvFile(dir: string): boolean {
+  return existsSync(join(dir, ".env")) || existsSync(join(dir, ".env.local"));
+}
+
+function isWorkspaceRoot(dir: string): boolean {
+  return existsSync(join(dir, "pnpm-workspace.yaml")) || existsSync(join(dir, ".git"));
+}
+
+export function findEnvDir(
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
+  const startDir = resolve(getInvocationCwd(env));
+  if (hasEnvFile(startDir)) {
+    return startDir;
+  }
+
+  let current = dirname(startDir);
+  for (let depth = 0; depth < 6; depth++) {
+    if (isWorkspaceRoot(current)) {
+      return hasEnvFile(current) ? current : undefined;
+    }
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+
+  return undefined;
+}
+
+export function loadDotEnv(
+  env: Record<string, string | undefined> = process.env,
+): Record<string, string> {
+  const dir = findEnvDir(env);
+  if (!dir) return {};
+
+  const loaded: Record<string, string> = {};
+  for (const filename of [".env", ".env.local"]) {
+    const filePath = join(dir, filename);
+    if (!existsSync(filePath)) continue;
+    const parsed = parseEnv(readFileSync(filePath, "utf8"));
+    for (const [key, value] of Object.entries(parsed)) {
+      if (value !== undefined) {
+        loaded[key] = value;
+      }
+    }
+  }
+  return loaded;
+}
+
+export function resolveEffectiveEnv(
+  env: Record<string, string | undefined> = process.env,
+): Record<string, string | undefined> {
+  const merged: Record<string, string | undefined> = { ...loadDotEnv(env) };
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined) {
+      merged[key] = value;
+    }
+  }
+  return merged;
 }
 
 export function loadConfigFile(
@@ -141,8 +203,9 @@ export function buildResolvedConfig(
   flags: Record<string, string | boolean>,
   env: Record<string, string | undefined> = process.env,
 ): SimConfig {
-  const fileConfig = loadConfigFile(stringFlag(flags, "config"), env);
-  const envConfig = configFromEnv(env);
+  const effectiveEnv = resolveEffectiveEnv(env);
+  const fileConfig = loadConfigFile(stringFlag(flags, "config"), effectiveEnv);
+  const envConfig = configFromEnv(effectiveEnv);
   const cliConfig = configFromFlags(flags);
   return resolveConfig({ file: fileConfig, env: envConfig, cli: cliConfig });
 }

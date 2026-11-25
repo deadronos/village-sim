@@ -48,7 +48,13 @@ pnpm village serve --port 4173 --seed 7 --days 7
 
 ## Configuration Precedence
 
-`CLI flags > Environment variables > village.config.json > Defaults`
+`CLI flags > Shell environment variables > .env.local > .env > village.config.json > Defaults`
+
+Copy [`.env.example`](.env.example) to `.env` (git-ignored) to configure your local setup automatically for both `@village/server` and `@village/web`:
+
+```bash
+cp .env.example .env
+```
 
 Supported environment variables:
 
@@ -62,6 +68,7 @@ DECISION_MAX_BATCH=3              # max entities decided per tick sweep (LoD + p
 DECISION_SAMPLE=weighted          # weighted | argmax
 DECISION_MIN_CONF=0.34
 DECISION_API_KEY=                 # optional bearer token
+PORT=4173                         # live simulation backend HTTP port (and Vite /api proxy target)
 ```
 
 ### Live Pacing & Decision Cadence

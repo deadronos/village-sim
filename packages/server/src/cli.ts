@@ -16,6 +16,7 @@ import {
   createProviderForConfig,
   getInvocationCwd,
   parseCliArgs,
+  resolveEffectiveEnv,
   resolveFromInvocationCwd,
 } from "./config-loader.ts";
 import { startVillageServer } from "./server.ts";
@@ -30,7 +31,7 @@ Usage:
   village explain --run <path/to/run.jsonl> --entity <id>
   village serve [--port 4173] [--tick-ms 850] [--seed 7] [--days 7]
 
-Options (CLI > env > village.config.json > defaults):
+Options (CLI > env > .env > village.config.json > defaults):
   --seed <n>            PRNG seed (default: ${DEFAULT_CONFIG.seed})
   --days <n>            Simulated days (default: ${DEFAULT_CONFIG.days})
   --provider <kind>     scripted | systemone | replay (env: DECISION_PROVIDER)
@@ -175,11 +176,12 @@ function cmdExplain(flags: Record<string, string | boolean>): number {
 }
 
 async function cmdServe(flags: Record<string, string | boolean>): Promise<number> {
-  const config = buildResolvedConfig({ days: "7", ...flags });
+  const effectiveEnv = resolveEffectiveEnv();
+  const config = buildResolvedConfig({ days: "7", ...flags }, effectiveEnv);
   const port =
     typeof flags.port === "string"
       ? Number.parseInt(flags.port, 10)
-      : Number.parseInt(process.env.PORT ?? "4173", 10);
+      : Number.parseInt(effectiveEnv.PORT ?? "4173", 10);
   const tickMs =
     typeof flags["tick-ms"] === "string" ? Number.parseInt(flags["tick-ms"], 10) : undefined;
   const autostart = flags.paused !== true;

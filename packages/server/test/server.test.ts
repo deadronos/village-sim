@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,7 +7,10 @@ import {
   DEFAULT_LIVE_TICK_MS,
   DEFAULT_SYSTEMONE_TICK_MS,
   LiveSimManager,
+  buildResolvedConfig,
   getInvocationCwd,
+  loadDotEnv,
+  resolveEffectiveEnv,
   resolveFromInvocationCwd,
   runCli,
   startVillageServer,
@@ -155,5 +158,78 @@ describe("CLI and live backend server", () => {
         process.env.INIT_CWD = prevInitCwd;
       }
     }
+  });
+
+  it("loads .env and .env.local with precedence CLI > shell env > .env.local > .env > config file > defaults", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-dotenv-"));
+    writeFileSync(
+      join(tempDir, "village.config.json"),
+      JSON.stringify({
+        provider: "scripted",
+        model: "from-json",
+        maxBatch: 5,
+      }),
+      "utf8",
+    );
+    writeFileSync(
+      join(tempDir, ".env"),
+      [
+        "DECISION_PROVIDER=systemone",
+        "DECISION_ENDPOINT=http://127.0.0.1:8009/v1/systemone",
+        "DECISION_MODEL=from-dotenv",
+        "DECISION_MAX_BATCH=4",
+        "PORT=4200",
+      ].join("\n"),
+      "utf8",
+    );
+    writeFileSync(
+      join(tempDir, ".env.local"),
+      ["DECISION_MODEL=from-dotenv-local", "PORT=4201"].join("\n"),
+      "utf8",
+    );
+
+    const baseEnv = { INIT_CWD: tempDir };
+    const effective = resolveEffectiveEnv(baseEnv);
+    expect(effective.PORT).toBe("4201");
+    expect(effective.DECISION_PROVIDER).toBe("systemone");
+
+    // .env.local overrides .env, .env overrides village.config.json
+    const fromFiles = buildResolvedConfig({}, baseEnv);
+    expect(fromFiles.provider).toBe("systemone");
+    expect(fromFiles.endpoint).toBe("http://127.0.0.1:8009/v1/systemone");
+    expect(fromFiles.model).toBe("from-dotenv-local");
+    expect(fromFiles.maxBatch).toBe(4);
+
+    // Shell env overrides .env and .env.local
+    const fromShell = buildResolvedConfig(
+      {},
+      { INIT_CWD: tempDir, DECISION_MODEL: "from-shell", PORT: "4300" },
+    );
+    expect(fromShell.model).toBe("from-shell");
+    expect(resolveEffectiveEnv({ INIT_CWD: tempDir, PORT: "4300" }).PORT).toBe("4300");
+
+    // CLI flags override shell env and .env files
+    const fromCli = buildResolvedConfig(
+      { provider: "scripted", model: "from-cli" },
+      { INIT_CWD: tempDir, DECISION_MODEL: "from-shell" },
+    );
+    expect(fromCli.provider).toBe("scripted");
+    expect(fromCli.model).toBe("from-cli");
+  });
+
+  it("discovers workspace-root .env when invoked from a nested package directory", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-ws-dotenv-"));
+    const nestedDir = join(tempDir, "packages", "server");
+    mkdirSync(nestedDir, { recursive: true });
+    writeFileSync(join(tempDir, "pnpm-workspace.yaml"), "packages:\n  - packages/*\n", "utf8");
+    writeFileSync(
+      join(tempDir, ".env"),
+      "DECISION_PROVIDER=systemone\nDECISION_MODEL=ws-root-model\n",
+      "utf8",
+    );
+
+    const loaded = loadDotEnv({ INIT_CWD: nestedDir });
+    expect(loaded.DECISION_PROVIDER).toBe("systemone");
+    expect(loaded.DECISION_MODEL).toBe("ws-root-model");
   });
 });
