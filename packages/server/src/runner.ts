@@ -38,6 +38,7 @@ export interface LiveStatus {
   tickMs: number;
   effectiveTickMs: number;
   lastTickMs: number;
+  fallbackActive: boolean;
   mode: "live" | "replay";
   replayFile?: string;
   config: Pick<
@@ -48,6 +49,7 @@ export interface LiveStatus {
     | "seed"
     | "days"
     | "sample"
+    | "escalateOn"
     | "minConf"
     | "batch"
     | "maxBatch"
@@ -70,7 +72,7 @@ export class LiveSimManager {
   private sim: VillageSimulation;
   private config: SimConfig;
   private running = false;
-  private stepping = false;
+  private steppingSim?: VillageSimulation;
   private tickMs: number;
   private effectiveTickMs: number;
   private lastTickDurationMs = 0;
@@ -104,21 +106,24 @@ export class LiveSimManager {
     const provider =
       customProvider ??
       createProviderForConfig(config, (msg) => {
+        if (sim !== this.sim) return;
         this.warnings.push(msg);
         this.broadcast({ type: "status", status: this.getStatus() });
       });
 
-    return new VillageSimulation(config, provider, {
+    const sim = new VillageSimulation(config, provider, {
       onEvent: (ev) => {
+        if (sim !== this.sim) return;
         this.recentEvents.push(ev);
         if (this.recentEvents.length > 250) {
           this.recentEvents.shift();
         }
       },
       onDayEnd: () => {
-        this.persistLiveLog();
+        if (sim === this.sim) this.persistLiveLog();
       },
     });
+    return sim;
   }
 
   private makeInitialSnapshot(): TickSnapshot {
@@ -143,6 +148,8 @@ export class LiveSimManager {
         totalGold: w.entities.reduce((s, e) => s + e.gold, 0),
         providerCalls: 0,
         fallbackRate: 0,
+        escalatedDecisions: 0,
+        escalationRate: 0,
       },
     };
   }
@@ -167,6 +174,7 @@ export class LiveSimManager {
       tickMs: this.tickMs,
       effectiveTickMs: this.effectiveTickMs,
       lastTickMs: this.lastTickDurationMs,
+      fallbackActive: this.sim.isProviderFallbackActive,
       mode: this.mode,
       replayFile: this.replayFile,
       config: {
@@ -176,6 +184,7 @@ export class LiveSimManager {
         seed: this.config.seed,
         days: this.config.days,
         sample: this.config.sample,
+        escalateOn: this.config.escalateOn,
         minConf: this.config.minConf,
         batch: this.config.batch,
         maxBatch: this.config.maxBatch,
@@ -252,22 +261,28 @@ export class LiveSimManager {
   }
 
   async stepOnce(): Promise<TickSnapshot | null> {
-    if (this.stepping || this.sim.isFinished) return null;
-    this.stepping = true;
+    const sim = this.sim;
+    if (this.steppingSim === sim || sim.isFinished) return null;
+    this.steppingSim = sim;
     const start = performance.now();
     try {
-      const snap = await this.sim.stepTick();
+      const snap = await sim.stepTick();
+      if (sim !== this.sim) return null;
+      if (!sim.isProviderFallbackActive) this.warnings.length = 0;
       const elapsed = Math.round(performance.now() - start);
       this.recordTickTiming(elapsed);
       this.latestSnapshot = snap;
-      if (this.sim.isFinished) {
+      if (sim.isFinished) {
         this.running = false;
         this.persistLiveLog();
       }
       this.broadcast({ type: "tick", snapshot: snap, status: this.getStatus() });
       return snap;
+    } catch (error) {
+      if (sim !== this.sim) return null;
+      throw error;
     } finally {
-      this.stepping = false;
+      if (this.steppingSim === sim) this.steppingSim = undefined;
     }
   }
 
@@ -288,12 +303,13 @@ export class LiveSimManager {
 
   private scheduleNextTick(delayMs: number): void {
     if (!this.running) return;
+    const sim = this.sim;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(async () => {
       this.timer = null;
       if (!this.running) return;
       await this.stepOnce();
-      if (this.running && !this.sim.isFinished) {
+      if (this.sim === sim && this.running && !sim.isFinished) {
         const minGap = this.config.provider === "systemone" ? SYSTEMONE_BREATHING_GAP_MS : 40;
         const nextDelay = Math.max(minGap, this.effectiveTickMs - this.lastTickDurationMs);
         this.scheduleNextTick(nextDelay);
@@ -360,6 +376,7 @@ export class LiveSimManager {
       seed: parsed.header.seed,
       days: parsed.header.days,
       sample: parsed.header.sample,
+      escalateOn: parsed.header.escalateOn ?? DEFAULT_CONFIG.escalateOn,
       minConf: parsed.header.minConf,
       maxBatch: parsed.header.maxBatch ?? DEFAULT_CONFIG.maxBatch,
       ticksPerDay: parsed.header.ticksPerDay,
@@ -371,7 +388,7 @@ export class LiveSimManager {
     }
     this.effectiveTickMs = this.tickMs;
 
-    const provider = new ReplayProvider(parsed.decisions);
+    const provider = new ReplayProvider(parsed.decisions, parsed.header.version);
     this.sim = this.createSimulation(this.config, provider);
     this.latestSnapshot = this.makeInitialSnapshot();
 

@@ -68,6 +68,7 @@ DECISION_TIMEOUT_MS=120000
 DECISION_BATCH=auto               # auto | always | never
 DECISION_MAX_BATCH=3              # max entities decided per tick sweep (LoD + pacing)
 DECISION_SAMPLE=weighted          # weighted | argmax
+DECISION_ESCALATE_ON=sampled       # sampled | margin | entropy
 DECISION_MIN_CONF=0.34
 DECISION_API_KEY=                 # optional bearer token
 PORT=4173                         # live simulation backend HTTP port (and Vite /api proxy target)
@@ -78,6 +79,8 @@ PORT=4173                         # live simulation backend HTTP port (and Vite 
 - **Deterministic LoD cadence**: Supply-chain roles (`farmer`, `baker`, `innkeeper`) stay immediately responsive (0 post-action cooldown), secondary craft roles (`woodcutter`, `smith`, `herbalist`) decide every 2nd tick, and non-critical roles (`guard`, `child`) decide every 3rd tick. Urgent hunger (`> 0.72`) always bypasses cooldown.
 - **Bounded tick batches**: Each tick sweep queries at most `DECISION_MAX_BATCH` entities (default `3`), prioritizing urgent hunger and supply-chain roles with deterministic round-robin fairness so batched local 4B inference stays under the 2s p95 budget.
 - **Adaptive live server pacing**: `village serve` defaults to `850ms` ticks for `scripted`/`replay` and `2000ms` for `systemone` (unless `--tick-ms` is explicitly set). When a `systemone` tick exceeds the target interval, `LiveSimManager` stretches `effectiveTickMs` and enforces a breathing gap between ticks so the SSE stream never stalls or piles up.
+- **System One recovery**: After three consecutive decision sweeps without usable answers, the simulation runs scripted decisions for five seconds before trying System One again. The HUD shows when scripted fallback is active and clears the indicator when System One returns a usable answer.
+- **Confidence escalation**: `DECISION_MIN_CONF` applies to the sampled probability, the gap between the top two probabilities, or one minus normalized entropy, depending on `DECISION_ESCALATE_ON`. The HUD and daily summary show the count and share of decisions escalated to the scripted policy.
 
 ## Verification Commands
 

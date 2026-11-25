@@ -11,7 +11,11 @@ export interface SystemOneOptions {
   retryBaseMs?: number;
   onWarning?: (message: string) => void;
   fetchImpl?: typeof fetch;
+  now?: () => number;
 }
+
+const CONSECUTIVE_FAILURE_LIMIT = 3;
+const FALLBACK_COOLDOWN_MS = 5_000;
 
 interface WireResponse {
   answers?: Record<string, unknown>;
@@ -71,8 +75,8 @@ function missingAnswerMetadata(
 /**
  * External System One typed-decision provider (`POST {endpoint}`).
  * Supports batching (`auto | always | never`), bounded per-entity retry on batch
- * failure, malformed answer rejection, and permanent fallback to ScriptedProvider
- * if the endpoint is unreachable for the run (§5.3, §5.4, §17).
+ * failure, malformed answer rejection, and temporary fallback to ScriptedProvider
+ * during an outage (§5.3, §5.4, §17).
  */
 export class SystemOneProvider implements DecisionProvider {
   readonly name = "systemone";
@@ -84,9 +88,12 @@ export class SystemOneProvider implements DecisionProvider {
   private readonly retryBaseMs: number;
   private readonly onWarning?: (message: string) => void;
   private readonly fetchImpl: typeof fetch;
+  private readonly now: () => number;
   private readonly fallback = new ScriptedProvider();
-  private permanentlyDown = false;
-  private consecutiveNetworkFailures = 0;
+  private scriptedFallbackActive = false;
+  private consecutiveFailures = 0;
+  private fallbackRetryAt?: number;
+  private probeInFlight = false;
 
   constructor(options: SystemOneOptions) {
     this.endpoint = options.endpoint;
@@ -97,10 +104,11 @@ export class SystemOneProvider implements DecisionProvider {
     this.retryBaseMs = options.retryBaseMs ?? 40;
     this.onWarning = options.onWarning;
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.now = options.now ?? (() => performance.now());
   }
 
   get isFallbackActive(): boolean {
-    return this.permanentlyDown;
+    return this.scriptedFallbackActive;
   }
 
   /**
@@ -148,7 +156,7 @@ export class SystemOneProvider implements DecisionProvider {
 
     const elapsed = Math.round(performance.now() - start);
     if (!res.ok) {
-      throw new HttpStatusError(res.status, `System One HTTP ${res.status}`);
+      throw new Error(`System One HTTP ${res.status}`);
     }
 
     const data = (await res.json()) as WireResponse;
@@ -177,159 +185,97 @@ export class SystemOneProvider implements DecisionProvider {
       };
     }
 
-    if (this.permanentlyDown) {
-      const fb = await this.fallback.decide(state, questions, seed);
-      return {
-        answers: fb.answers,
-        meta: {
-          latencyMs: 0,
-          provider: this.fallback.name,
-          batched: keys.length > 1,
-          fallbackUsed: true,
-        },
-      };
+    const retryAt = this.fallbackRetryAt;
+    if (retryAt !== undefined) {
+      if (this.probeInFlight || this.now() < retryAt) {
+        return this.scriptedFallback(state, questions, seed, 0, keys.length > 1);
+      }
+      this.probeInFlight = true;
     }
 
     const shouldBatch = this.batch === "always" || (this.batch === "auto" && keys.length >= 2);
-
-    if (shouldBatch) {
-      try {
-        const { rawAnswers, latencyMs } = await this.postSystemOne(state, questions);
-        this.consecutiveNetworkFailures = 0;
-        const answers: Record<string, Answer> = {};
-        for (const [qId, q] of Object.entries(questions)) {
-          const sanitized = sanitizeAnswer(rawAnswers[qId], q);
-          if (sanitized) answers[qId] = sanitized;
-        }
-        return {
-          answers,
-          meta: {
-            latencyMs,
-            provider: this.name,
-            batched: true,
-            ...missingAnswerMetadata(questions, answers),
-          },
-        };
-      } catch (err) {
-        // Batched call failed: retry once per-entity with bounded exponential backoff (§5.4)
-        const isNetworkError = !(err instanceof HttpStatusError);
-        const perEntity = await this.retryPerEntity(state, questions, seed, isNetworkError);
-        return perEntity;
+    try {
+      const result = await this.requestAnswers(state, questions, shouldBatch);
+      if (Object.keys(result.answers).length > 0) {
+        this.scriptedFallbackActive = false;
+        this.consecutiveFailures = 0;
+        this.fallbackRetryAt = undefined;
+        return result;
       }
-    }
 
-    // Single-question or DECISION_BATCH=never path
-    return this.decidePerEntity(state, questions, seed);
+      this.consecutiveFailures += 1;
+      if (this.consecutiveFailures >= CONSECUTIVE_FAILURE_LIMIT) {
+        const wasCoolingDown = this.fallbackRetryAt !== undefined;
+        this.fallbackRetryAt = this.now() + FALLBACK_COOLDOWN_MS;
+        if (!wasCoolingDown) {
+          this.onWarning?.(
+            `System One returned no usable answers in ${CONSECUTIVE_FAILURE_LIMIT} consecutive decision sweeps. Using scripted fallback and retrying in ${FALLBACK_COOLDOWN_MS / 1000} seconds.`,
+          );
+        }
+      }
+      return this.scriptedFallback(
+        state,
+        questions,
+        seed,
+        result.meta.latencyMs,
+        result.meta.batched,
+      );
+    } finally {
+      if (retryAt !== undefined) this.probeInFlight = false;
+    }
+  }
+
+  private async requestAnswers(
+    state: string | Record<string, unknown>,
+    questions: Record<string, Question>,
+    shouldBatch: boolean,
+  ): Promise<ProviderResult> {
+    if (!shouldBatch) return this.decidePerEntity(state, questions, false);
+
+    try {
+      const { rawAnswers, latencyMs } = await this.postSystemOne(state, questions);
+      const answers: Record<string, Answer> = {};
+      for (const [qId, q] of Object.entries(questions)) {
+        const sanitized = sanitizeAnswer(rawAnswers[qId], q);
+        if (sanitized) answers[qId] = sanitized;
+      }
+      return {
+        answers,
+        meta: {
+          latencyMs,
+          provider: this.name,
+          batched: true,
+          ...missingAnswerMetadata(questions, answers),
+        },
+      };
+    } catch {
+      // Batched call failed: retry once per entity with bounded exponential backoff (§5.4).
+      return this.decidePerEntity(state, questions, true);
+    }
   }
 
   private async decidePerEntity(
     state: string | Record<string, unknown>,
     questions: Record<string, Question>,
-    seed: number,
+    retryingBatch: boolean,
   ): Promise<ProviderResult> {
     const answers: Record<string, Answer> = {};
     let totalLatency = 0;
-    let networkFailures = 0;
-    let anySuccess = false;
 
-    for (const [qId, q] of Object.entries(questions)) {
-      try {
-        const { rawAnswers, latencyMs } = await this.postSystemOne(state, { [qId]: q });
-        totalLatency += latencyMs;
-        anySuccess = true;
-        this.consecutiveNetworkFailures = 0;
-        const sanitized = sanitizeAnswer(rawAnswers[qId], q);
-        if (sanitized) {
-          answers[qId] = sanitized;
-        }
-      } catch (err) {
-        if (!(err instanceof HttpStatusError)) {
-          networkFailures += 1;
-        }
-      }
-    }
-
-    if (!anySuccess && networkFailures === Object.keys(questions).length) {
-      this.tripPermanentFallback(
-        "System One endpoint unreachable; switching permanently to scripted provider.",
-      );
-      const fb = await this.fallback.decide(state, questions, seed);
-      return {
-        answers: fb.answers,
-        meta: {
-          latencyMs: totalLatency,
-          provider: this.fallback.name,
-          batched: false,
-          fallbackUsed: true,
-        },
-      };
-    }
-
-    return {
-      answers,
-      meta: {
-        latencyMs: totalLatency,
-        provider: anySuccess ? this.name : this.fallback.name,
-        batched: false,
-        ...missingAnswerMetadata(questions, answers),
-      },
-    };
-  }
-
-  private async retryPerEntity(
-    state: string | Record<string, unknown>,
-    questions: Record<string, Question>,
-    seed: number,
-    initialWasNetworkError: boolean,
-  ): Promise<ProviderResult> {
-    const answers: Record<string, Answer> = {};
-    let totalLatency = 0;
-    let successes = 0;
-    let networkErrors = initialWasNetworkError ? 1 : 0;
-
-    let idx = 0;
-    for (const [qId, q] of Object.entries(questions)) {
-      if (this.retryBaseMs > 0) {
-        const backoff = Math.min(this.retryBaseMs * 2 ** Math.min(idx, 3), 400);
+    for (const [index, [qId, q]] of Object.entries(questions).entries()) {
+      if (retryingBatch && this.retryBaseMs > 0) {
+        const backoff = Math.min(this.retryBaseMs * 2 ** Math.min(index, 3), 400);
         await sleep(backoff);
       }
-      idx += 1;
 
       try {
         const { rawAnswers, latencyMs } = await this.postSystemOne(state, { [qId]: q });
         totalLatency += latencyMs;
-        successes += 1;
-        this.consecutiveNetworkFailures = 0;
         const sanitized = sanitizeAnswer(rawAnswers[qId], q);
-        if (sanitized) {
-          answers[qId] = sanitized;
-        }
-      } catch (err) {
-        if (!(err instanceof HttpStatusError)) {
-          networkErrors += 1;
-        }
+        if (sanitized) answers[qId] = sanitized;
+      } catch {
+        // Leave the failed question unanswered so the simulator can fall back for it.
       }
-    }
-
-    if (successes === 0) {
-      if (networkErrors >= Object.keys(questions).length) {
-        this.consecutiveNetworkFailures += 1;
-        if (this.consecutiveNetworkFailures >= 1) {
-          this.tripPermanentFallback(
-            `System One endpoint ${this.endpoint} unreachable; switching permanently to scripted provider.`,
-          );
-        }
-      }
-      const fb = await this.fallback.decide(state, questions, seed);
-      return {
-        answers: fb.answers,
-        meta: {
-          latencyMs: totalLatency,
-          provider: this.fallback.name,
-          batched: false,
-          fallbackUsed: true,
-        },
-      };
     }
 
     return {
@@ -343,18 +289,18 @@ export class SystemOneProvider implements DecisionProvider {
     };
   }
 
-  private tripPermanentFallback(message: string): void {
-    if (!this.permanentlyDown) {
-      this.permanentlyDown = true;
-      this.onWarning?.(message);
-    }
-  }
-}
-
-class HttpStatusError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
+  private async scriptedFallback(
+    state: string | Record<string, unknown>,
+    questions: Record<string, Question>,
+    seed: number,
+    latencyMs: number,
+    batched: boolean,
+  ): Promise<ProviderResult> {
+    this.scriptedFallbackActive = true;
+    const { answers } = await this.fallback.decide(state, questions, seed);
+    return {
+      answers,
+      meta: { latencyMs, provider: this.fallback.name, batched, fallbackUsed: true },
+    };
   }
 }

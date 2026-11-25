@@ -90,6 +90,8 @@ export class VillageHud {
   private readonly statMeals = el<HTMLElement>("stat-meals");
   private readonly statGold = el<HTMLElement>("stat-gold");
   private readonly statProvider = el<HTMLElement>("stat-provider");
+  private readonly statFallback = el<HTMLElement>("stat-fallback");
+  private readonly statEscalated = el<HTMLElement>("stat-escalated");
   private readonly statHash = el<HTMLElement>("stat-hash");
 
   private readonly settingsDialog = el<HTMLDialogElement>("settings-dialog");
@@ -249,19 +251,20 @@ export class VillageHud {
       effMs > status.tickMs
         ? `Target ${status.tickMs}ms · adaptive ${effMs}ms (last tick ${lastMs}ms)`
         : `Tick interval ${status.tickMs}ms`;
+    const provider = status.fallbackActive ? "scripted fallback" : status.config.provider;
     const providerLabel =
       status.mode === "replay"
         ? `replay (${status.replayFile ?? "jsonl"})`
-        : `${status.config.provider} · seed ${status.config.seed}`;
+        : `${provider} · seed ${status.config.seed}`;
     this.statProvider.textContent = providerLabel;
     this.statProvider.title = providerLabel;
 
-    if (status.warnings.length > 0) {
-      this.warningBanner.hidden = false;
-      this.warningBanner.textContent = status.warnings[status.warnings.length - 1] ?? "";
-    } else {
-      this.warningBanner.hidden = true;
-    }
+    const latestWarning =
+      status.config.provider === "systemone" && status.fallbackActive === false
+        ? undefined
+        : status.warnings.at(-1);
+    this.warningBanner.hidden = !latestWarning;
+    this.warningBanner.textContent = latestWarning ?? "";
   }
 
   resetEvents(initialEvents: SimEvent[]): void {
@@ -285,6 +288,11 @@ export class VillageHud {
     this.statStew.textContent = String(snapshot.stats.stewProducedToday);
     this.statMeals.textContent = String(snapshot.stats.mealsToday);
     this.statGold.textContent = `${snapshot.stats.totalGold}g`;
+    this.statFallback.textContent = `${(snapshot.stats.fallbackRate * 100).toFixed(1)}%`;
+    this.statEscalated.textContent =
+      status.config.provider === "scripted" && status.mode !== "replay"
+        ? "n/a"
+        : `${snapshot.stats.escalatedDecisions} (${(snapshot.stats.escalationRate * 100).toFixed(1)}%)`;
     this.statHash.textContent = snapshot.stateHash.slice(0, 12);
     this.statHash.title = snapshot.stateHash;
 

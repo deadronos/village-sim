@@ -8,6 +8,7 @@ export interface FakeSystemOneConfig {
   always500?: boolean;
   malformedQuestionId?: string;
   latencyMs?: number;
+  choiceWeights?: readonly number[];
 }
 
 export interface FakeSystemOneHandle {
@@ -106,6 +107,15 @@ export async function startFakeSystemOne(
         if (config.malformedQuestionId === qId) {
           // Deliberately malformed answer (missing probabilities)
           answers[qId] = { type: "choice", choice: "invalid_option" };
+        } else if (config.choiceWeights) {
+          answers[qId] = {
+            probabilities: Object.fromEntries(
+              Object.keys(questions[qId]!.criteria).map((key, index) => [
+                key,
+                config.choiceWeights![index] ?? 0,
+              ]),
+            ),
+          };
         } else {
           answers[qId] = ans;
         }

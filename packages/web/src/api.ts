@@ -22,6 +22,7 @@ export interface ClientStatus {
   tickMs: number;
   effectiveTickMs?: number;
   lastTickMs?: number;
+  fallbackActive: boolean;
   mode: "live" | "replay";
   replayFile?: string;
   config: Pick<
@@ -32,6 +33,7 @@ export interface ClientStatus {
     | "seed"
     | "days"
     | "sample"
+    | "escalateOn"
     | "minConf"
     | "batch"
     | "maxBatch"
@@ -142,6 +144,7 @@ export class VillageApiClient {
       tickMs: this.localTickMs,
       effectiveTickMs: this.localTickMs,
       lastTickMs: 0,
+      fallbackActive: false,
       mode: "live",
       config: {
         provider: this.localConfig.provider,
@@ -150,6 +153,7 @@ export class VillageApiClient {
         seed: this.localConfig.seed,
         days: this.localConfig.days,
         sample: this.localConfig.sample,
+        escalateOn: this.localConfig.escalateOn,
         minConf: this.localConfig.minConf,
         batch: this.localConfig.batch,
         maxBatch: this.localConfig.maxBatch,
@@ -180,6 +184,8 @@ export class VillageApiClient {
         totalGold: w.entities.reduce((s, e) => s + e.gold, 0),
         providerCalls: 0,
         fallbackRate: 0,
+        escalatedDecisions: 0,
+        escalationRate: 0,
       },
     };
   }

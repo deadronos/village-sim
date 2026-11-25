@@ -105,8 +105,12 @@ export function formatDaySummaryTable(summary: DaySummary): string {
   const golds = summary.entities.map((e) => e.gold);
   const minGold = golds.length > 0 ? Math.min(...golds) : 0;
   const maxGold = golds.length > 0 ? Math.max(...golds) : 0;
+  const escalationRate =
+    summary.providerDecisions > 0 ? summary.escalatedDecisions / summary.providerDecisions : 0;
   const escalatedLabel =
-    summary.provider === "scripted" ? "n/a (scripted)" : String(summary.escalatedDecisions);
+    summary.provider === "scripted"
+      ? "n/a (scripted)"
+      : `${summary.escalatedDecisions} (${(escalationRate * 100).toFixed(1)}%)`;
   const lines: string[] = [
     ``,
     `--- End of Day ${summary.day} (${summary.weather}) ---`,

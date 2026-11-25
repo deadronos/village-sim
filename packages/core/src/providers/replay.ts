@@ -2,6 +2,7 @@ import type {
   Answer,
   DecisionLogRecord,
   DecisionProvider,
+  HeaderLogRecord,
   ProviderResult,
   Question,
 } from "../types.ts";
@@ -12,11 +13,13 @@ import type {
  */
 export class ReplayProvider implements DecisionProvider {
   readonly name = "replay";
+  readonly runVersion: HeaderLogRecord["version"];
   private readonly recordsByKey = new Map<string, DecisionLogRecord>();
   private currentDay = 1;
   private currentTick = 0;
 
-  constructor(records: readonly DecisionLogRecord[]) {
+  constructor(records: readonly DecisionLogRecord[], runVersion: HeaderLogRecord["version"] = 2) {
+    this.runVersion = runVersion;
     for (const rec of records) {
       this.recordsByKey.set(this.keyFor(rec.day, rec.tick, rec.question_id), rec);
     }

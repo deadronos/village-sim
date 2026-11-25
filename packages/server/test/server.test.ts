@@ -15,6 +15,7 @@ import {
   runCli,
   startVillageServer,
   type LiveServerHandle,
+  type StreamMessage,
 } from "../src/index.ts";
 
 describe("CLI and live backend server", () => {
@@ -108,6 +109,69 @@ describe("CLI and live backend server", () => {
     scriptedMgr.setSpeed(1500);
     scriptedMgr.reset({ provider: "scripted" });
     expect(scriptedMgr.getStatus().tickMs).toBe(1500);
+  });
+
+  it("publishes actual provider fallback in live stream status", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-fallback-"));
+    const manager = new LiveSimManager(
+      {
+        ...DEFAULT_CONFIG,
+        provider: "systemone",
+        endpoint: "http://127.0.0.1:1/v1/systemone",
+        batch: "never",
+        timeoutMs: 100,
+      },
+      { runsDir: tempDir },
+    );
+    const messages: StreamMessage[] = [];
+    const unsubscribe = manager.subscribe((msg) => messages.push(msg));
+    try {
+      expect(manager.getStatus().fallbackActive).toBe(false);
+      await manager.stepOnce();
+      expect(manager.getStatus().fallbackActive).toBe(true);
+      expect(manager.getStatus().warnings).toHaveLength(0);
+      await manager.stepOnce();
+      expect(manager.getStatus().fallbackActive).toBe(true);
+      expect(manager.getStatus().warnings).toHaveLength(1);
+      expect(messages.findLast((msg) => msg.type === "tick")?.status.fallbackActive).toBe(true);
+      manager.reset({ provider: "scripted" });
+      expect(messages.at(-1)).toMatchObject({ type: "reset", status: { fallbackActive: false } });
+    } finally {
+      unsubscribe();
+    }
+  });
+
+  it("isolates a reset from the previous simulation's in-flight fallback", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-reset-"));
+    const manager = new LiveSimManager(
+      {
+        ...DEFAULT_CONFIG,
+        provider: "systemone",
+        endpoint: "http://127.0.0.1:1/v1/systemone",
+        batch: "never",
+        timeoutMs: 100,
+      },
+      { runsDir: tempDir },
+    );
+    await manager.stepOnce();
+
+    const messages: StreamMessage[] = [];
+    const unsubscribe = manager.subscribe((msg) => messages.push(msg));
+    try {
+      const outdatedTick = manager.stepOnce();
+      manager.reset({ provider: "scripted", seed: 123 });
+      const [outdated, current] = await Promise.all([outdatedTick, manager.stepOnce()]);
+
+      expect(outdated).toBeNull();
+      expect(current).not.toBeNull();
+      expect(messages.map((msg) => msg.type)).toEqual(["reset", "tick"]);
+      expect(manager.getFullState()).toMatchObject({
+        snapshot: { stateHash: current?.stateHash },
+        status: { config: { seed: 123 }, fallbackActive: false, warnings: [] },
+      });
+    } finally {
+      unsubscribe();
+    }
   });
 
   it("resolves default and relative CLI paths against INIT_CWD without doubling workspace dirs", async () => {

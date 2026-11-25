@@ -113,6 +113,7 @@ function makeStatus(overrides: Partial<ClientStatus> = {}): ClientStatus {
     running: true,
     finished: false,
     tickMs: 850,
+    fallbackActive: false,
     mode: "live",
     config: {
       provider: DEFAULT_CONFIG.provider,
@@ -121,8 +122,10 @@ function makeStatus(overrides: Partial<ClientStatus> = {}): ClientStatus {
       seed: 7,
       days: 7,
       sample: DEFAULT_CONFIG.sample,
+      escalateOn: DEFAULT_CONFIG.escalateOn,
       minConf: DEFAULT_CONFIG.minConf,
       batch: DEFAULT_CONFIG.batch,
+      maxBatch: DEFAULT_CONFIG.maxBatch,
     },
     warnings: [],
     ...overrides,
@@ -167,6 +170,8 @@ function makeSnapshot(stateHash: string): TickSnapshot {
       totalGold: 120,
       providerCalls: 6,
       fallbackRate: 0,
+      escalatedDecisions: 0,
+      escalationRate: 0,
     },
   };
 }
@@ -241,6 +246,21 @@ describe("Viewer HUD layout & polish (Issue #5)", () => {
       expect(statHash.title).toBe(fullHash);
       expect(statProvider.textContent).toBe("scripted · seed 7");
       expect(statProvider.title).toBe("scripted · seed 7");
+
+      const snapshot = makeSnapshot(fullHash);
+      snapshot.stats.fallbackRate = 0.25;
+      snapshot.stats.escalatedDecisions = 3;
+      snapshot.stats.escalationRate = 0.125;
+      const providerStatus = makeStatus({ fallbackActive: true });
+      providerStatus.config.provider = "systemone";
+      providerStatus.warnings = ["System One is temporarily unavailable."];
+      hud.updateSnapshot(snapshot, providerStatus);
+      expect(statProvider.textContent).toBe("scripted fallback · seed 7");
+      expect(dom.get("stat-fallback")?.textContent).toBe("25.0%");
+      expect(dom.get("stat-escalated")?.textContent).toBe("3 (12.5%)");
+      hud.setStatus({ ...providerStatus, fallbackActive: false });
+      expect(statProvider.textContent).toBe("systemone · seed 7");
+      expect(dom.get("warning-banner")?.hidden).toBe(true);
 
       // Replay mode also populates full provider title tooltip
       hud.setStatus(
