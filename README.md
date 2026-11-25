@@ -2,6 +2,11 @@
 
 An autonomous, deterministic village simulation where 8 inhabitants (farmer, baker, innkeeper, woodcutter, smith, herbalist, guard, child) run their daily lives through a pluggable **typed-decision provider** (System One or offline scripted fallback) while deterministic TypeScript owns the place graph, economy, inventory, gating, and invariants — paired with an interactive **low-poly WebGPU Three.js** 3D village viewer.
 
+## Screenshot
+
+A snapshot of the low-poly village in action:
+![Village Sim Screenshot](image.png)
+
 ## Stack
 
 - **TypeScript 7** (`tsc` native compiler), **pnpm** workspaces
