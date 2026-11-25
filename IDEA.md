@@ -428,13 +428,14 @@ Ship M0–M3 before touching graphics or dialogue.
 
 ## 16. Reference implementation and measurements
 
-A working Python reference exists at `~/Github/village-sim` (stdlib only, 8
-entities, ~790 lines): dawn plan + batched per-tick decisions, deterministic
-economy, JSONL log. A typical day: **48 provider calls, 22 trades, ~80 s wall
-time** against the local 4B model. Its README records the exact failure that led
-to the gating rule — the model idled the village until the option set was
-constrained. Use it for behaviour and numbers; feel free to rebuild the
-architecture around §5.
+A working Python reference is preserved in [`reference/village/`](reference/village/)
+(stdlib only, 8 entities, ~790 lines, restored from the original initial commit
+`7a112a0`): dawn plan + batched per-tick decisions, deterministic economy, JSONL
+log. A typical day: **48 provider calls, 22 trades, ~80 s wall time** against the
+local 4B model. Its [`reference/README.md`](reference/README.md) records the
+exact failure that led to the gating rule — the model idled the village until
+the option set was constrained. Use it for behaviour and numbers; feel free to
+rebuild the architecture around §5.
 
 ---
 

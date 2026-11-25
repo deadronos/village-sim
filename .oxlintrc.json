@@ -11,5 +11,5 @@
     "no-await-in-loop": "off",
     "typescript/no-explicit-any": "warn"
   },
-  "ignorePatterns": ["**/dist/**", "node_modules/**", "runs/**"]
+  "ignorePatterns": ["**/dist/**", "node_modules/**", "runs/**", "reference/**"]
 }
