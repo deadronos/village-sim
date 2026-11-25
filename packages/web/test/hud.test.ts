@@ -262,6 +262,30 @@ describe("Viewer HUD layout & polish (Issue #5)", () => {
       expect(statProvider.textContent).toBe("systemone · seed 7");
       expect(dom.get("warning-banner")?.hidden).toBe(true);
 
+      // Partial degradation displays distinct degraded state without full fallback
+      hud.setStatus({
+        ...providerStatus,
+        fallbackActive: false,
+        degraded: true,
+        partialFallbackRate: 0.67,
+        warnings: [],
+      });
+      expect(statProvider.textContent).toBe("systemone (degraded) · seed 7");
+      expect(statProvider.title).toContain("67% partial fallback");
+      expect(dom.get("warning-banner")?.hidden).toBe(false);
+      expect(dom.get("warning-banner")?.textContent).toContain("67%");
+
+      // Clearing degradation restores healthy provider label and hides warning banner
+      hud.setStatus({
+        ...providerStatus,
+        fallbackActive: false,
+        degraded: false,
+        partialFallbackRate: 0,
+        warnings: [],
+      });
+      expect(statProvider.textContent).toBe("systemone · seed 7");
+      expect(dom.get("warning-banner")?.hidden).toBe(true);
+
       // Replay mode also populates full provider title tooltip
       hud.setStatus(
         makeStatus({

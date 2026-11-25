@@ -5,6 +5,7 @@ import { isDeepStrictEqual } from "node:util";
 import {
   DEFAULT_CONFIG,
   ReplayProvider,
+  SystemOneProvider,
   VillageSimulation,
   explainLastDecision,
   formatDaySummaryTable,
@@ -13,6 +14,7 @@ import {
   serializeJsonl,
   type EventLogRecord,
   type SimEvent,
+  type StartupHealthProbe,
 } from "@village/core";
 import {
   buildResolvedConfig,
@@ -49,6 +51,7 @@ Options (CLI > env > .env > village.config.json > defaults):
   --api-key <token>     Optional bearer token (env: DECISION_API_KEY)
   --out <path>          JSONL output path (default: runs/seed-<seed>.jsonl, relative to cwd)
   --explain <entity>    Print explain report for entity after run
+  --allow-degraded      Continue in scripted fallback mode if System One health check fails
   --quiet               Suppress per-event timeline output (JSONL still written)
 `);
 }
@@ -57,8 +60,33 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
   const config = buildResolvedConfig(flags);
   const provider = createProviderForConfig(config);
   const quiet = Boolean(config.quiet);
+  let startupHealth: StartupHealthProbe | undefined;
+
+  if (provider instanceof SystemOneProvider) {
+    startupHealth = await provider.checkHealth(3000);
+    if (!startupHealth.ok) {
+      const detail =
+        startupHealth.status !== undefined
+          ? `HTTP ${startupHealth.status}`
+          : (startupHealth.error ?? "unreachable");
+      const allowDegraded = flags["allow-degraded"] === true || flags["allow-degraded"] === "true";
+      if (!allowDegraded) {
+        console.error(
+          `[village] ERROR: System One health check failed for ${config.endpoint} (${detail}).\n` +
+            `Start the System One server, switch to --provider scripted, or pass --allow-degraded to run in scripted fallback mode.`,
+        );
+        return 1;
+      }
+      console.warn(
+        `[village] WARNING: System One health check failed for ${config.endpoint} (${detail}). ` +
+          `Continuing in scripted fallback mode (--allow-degraded).`,
+      );
+      provider.activateFallback();
+    }
+  }
 
   const sim = new VillageSimulation(config, provider, {
+    startupHealth,
     onEvent: (ev) => {
       if (!quiet && ev.kind !== "move") {
         console.log(ev.message);

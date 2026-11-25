@@ -53,6 +53,7 @@ import type {
   Question,
   SimConfig,
   SimEvent,
+  StartupHealthProbe,
   TickHashRecord,
   TickSnapshot,
   WorldState,
@@ -72,6 +73,7 @@ export interface SimulationHooks {
   onEvent?: (event: SimEvent) => void;
   onTick?: (snapshot: TickSnapshot) => void;
   onDayEnd?: (summary: DaySummary) => void;
+  startupHealth?: StartupHealthProbe;
 }
 
 export interface SimulationRunResult {
@@ -235,6 +237,10 @@ export class VillageSimulation {
       ticksPerDay: config.ticksPerDay,
       minutesPerTick: config.minutesPerTick,
       startHour: config.startHour,
+      ...(hooks.startupHealth ? { startupHealth: hooks.startupHealth } : {}),
+      ...(config.provider === "systemone" || provider.isFallbackActive
+        ? { initialFallbackActive: provider.isFallbackActive ?? false }
+        : {}),
     };
     this.records.push(header);
   }
@@ -245,6 +251,14 @@ export class VillageSimulation {
 
   get isProviderFallbackActive(): boolean {
     return this.provider.isFallbackActive ?? false;
+  }
+
+  get isProviderDegraded(): boolean {
+    return this.provider.isDegraded ?? false;
+  }
+
+  get providerPartialFallbackRate(): number {
+    return this.provider.partialFallbackRate ?? 0;
   }
 
   private emitEvent(event: SimEvent, tickEvents: SimEvent[]): void {

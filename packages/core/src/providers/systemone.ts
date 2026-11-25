@@ -1,5 +1,12 @@
 import { pickArgmax } from "../rng.ts";
-import type { Answer, BatchMode, DecisionProvider, ProviderResult, Question } from "../types.ts";
+import type {
+  Answer,
+  BatchMode,
+  DecisionProvider,
+  ProviderResult,
+  Question,
+  StartupHealthProbe,
+} from "../types.ts";
 import { ScriptedProvider } from "./scripted.ts";
 
 export interface SystemOneOptions {
@@ -16,6 +23,9 @@ export interface SystemOneOptions {
 
 const CONSECUTIVE_FAILURE_LIMIT = 3;
 const FALLBACK_COOLDOWN_MS = 5_000;
+const DEFAULT_HEALTH_TIMEOUT_MS = 3_000;
+const DEGRADATION_WINDOW = 10;
+const COMPLETENESS_THRESHOLD = 0.9;
 
 interface WireResponse {
   answers?: Record<string, unknown>;
@@ -94,6 +104,9 @@ export class SystemOneProvider implements DecisionProvider {
   private consecutiveFailures = 0;
   private fallbackRetryAt?: number;
   private probeInFlight = false;
+  private readonly sweepWindow: Array<{ asked: number; missing: number }> = [];
+  private consecutiveDegradedSweeps = 0;
+  private degradedWarningEmitted = false;
 
   constructor(options: SystemOneOptions) {
     this.endpoint = options.endpoint;
@@ -111,10 +124,41 @@ export class SystemOneProvider implements DecisionProvider {
     return this.scriptedFallbackActive;
   }
 
+  get partialFallbackRate(): number {
+    let totalAsked = 0;
+    let totalMissing = 0;
+    for (const sweep of this.sweepWindow) {
+      totalAsked += sweep.asked;
+      totalMissing += sweep.missing;
+    }
+    return totalAsked > 0 ? totalMissing / totalAsked : 0;
+  }
+
+  get isDegraded(): boolean {
+    if (this.scriptedFallbackActive) return false;
+    let totalAsked = 0;
+    let totalMissing = 0;
+    for (const sweep of this.sweepWindow) {
+      totalAsked += sweep.asked;
+      totalMissing += sweep.missing;
+    }
+    return totalAsked > 0 && (totalAsked - totalMissing) / totalAsked < COMPLETENESS_THRESHOLD;
+  }
+
+  /**
+   * Immediately enters scripted fallback mode with the standard retry cooldown,
+   * e.g. when a startup health probe fails under `--allow-degraded`.
+   */
+  activateFallback(): void {
+    this.scriptedFallbackActive = true;
+    this.consecutiveFailures = CONSECUTIVE_FAILURE_LIMIT;
+    this.fallbackRetryAt = this.now() + FALLBACK_COOLDOWN_MS;
+  }
+
   /**
    * Health check via `GET /v1/models` (a bare `GET /` returns 404 on System One servers).
    */
-  async checkHealth(): Promise<{ ok: boolean; status?: number; error?: string }> {
+  async checkHealth(timeoutMs = DEFAULT_HEALTH_TIMEOUT_MS): Promise<StartupHealthProbe> {
     try {
       const url = new URL(this.endpoint);
       url.pathname = "/v1/models";
@@ -123,7 +167,7 @@ export class SystemOneProvider implements DecisionProvider {
       const res = await this.fetchImpl(url.toString(), {
         method: "GET",
         headers,
-        signal: AbortSignal.timeout(Math.min(this.timeoutMs, 5000)),
+        signal: AbortSignal.timeout(Math.min(this.timeoutMs, timeoutMs)),
       });
       return { ok: res.ok, status: res.status };
     } catch (err) {
@@ -196,10 +240,12 @@ export class SystemOneProvider implements DecisionProvider {
     const shouldBatch = this.batch === "always" || (this.batch === "auto" && keys.length >= 2);
     try {
       const result = await this.requestAnswers(state, questions, shouldBatch);
-      if (Object.keys(result.answers).length > 0) {
+      const answeredCount = Object.keys(result.answers).length;
+      if (answeredCount > 0) {
         this.scriptedFallbackActive = false;
         this.consecutiveFailures = 0;
         this.fallbackRetryAt = undefined;
+        this.recordSweepOutcome(keys.length, keys.length - answeredCount);
         return result;
       }
 
@@ -287,6 +333,32 @@ export class SystemOneProvider implements DecisionProvider {
         ...missingAnswerMetadata(questions, answers),
       },
     };
+  }
+
+  private recordSweepOutcome(asked: number, missing: number): void {
+    this.sweepWindow.push({ asked, missing });
+    if (this.sweepWindow.length > DEGRADATION_WINDOW) {
+      this.sweepWindow.shift();
+    }
+    const completeness = (asked - missing) / asked;
+    if (completeness >= COMPLETENESS_THRESHOLD) {
+      this.consecutiveDegradedSweeps = 0;
+      if (!this.isDegraded) {
+        this.degradedWarningEmitted = false;
+      }
+      return;
+    }
+
+    this.consecutiveDegradedSweeps += 1;
+    if (
+      this.consecutiveDegradedSweeps >= CONSECUTIVE_FAILURE_LIMIT &&
+      !this.degradedWarningEmitted
+    ) {
+      this.degradedWarningEmitted = true;
+      this.onWarning?.(
+        `System One is degraded: ${Math.round(this.partialFallbackRate * 100)}% of recent decisions required scripted fallback across ${this.consecutiveDegradedSweeps} consecutive partial sweeps.`,
+      );
+    }
   }
 
   private async scriptedFallback(

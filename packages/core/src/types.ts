@@ -48,9 +48,17 @@ export interface ProviderResult {
   meta: ProviderCallMetadata;
 }
 
+export interface StartupHealthProbe {
+  ok: boolean;
+  status?: number;
+  error?: string;
+}
+
 export interface DecisionProvider {
   readonly name: string;
   readonly isFallbackActive?: boolean;
+  readonly isDegraded?: boolean;
+  readonly partialFallbackRate?: number;
   decide(
     state: string | Record<string, unknown>,
     questions: Record<string, Question>,
@@ -263,6 +271,8 @@ export interface HeaderLogRecord {
   ticksPerDay: number;
   minutesPerTick: number;
   startHour?: number;
+  startupHealth?: StartupHealthProbe;
+  initialFallbackActive?: boolean;
 }
 
 export interface TickHashRecord {

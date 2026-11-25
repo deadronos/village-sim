@@ -39,6 +39,8 @@ export interface LiveStatus {
   effectiveTickMs: number;
   lastTickMs: number;
   fallbackActive: boolean;
+  degraded: boolean;
+  partialFallbackRate: number;
   mode: "live" | "replay";
   replayFile?: string;
   config: Pick<
@@ -175,6 +177,8 @@ export class LiveSimManager {
       effectiveTickMs: this.effectiveTickMs,
       lastTickMs: this.lastTickDurationMs,
       fallbackActive: this.sim.isProviderFallbackActive,
+      degraded: this.sim.isProviderDegraded,
+      partialFallbackRate: this.sim.providerPartialFallbackRate,
       mode: this.mode,
       replayFile: this.replayFile,
       config: {
@@ -268,7 +272,7 @@ export class LiveSimManager {
     try {
       const snap = await sim.stepTick();
       if (sim !== this.sim) return null;
-      if (!sim.isProviderFallbackActive) this.warnings.length = 0;
+      if (!sim.isProviderFallbackActive && !sim.isProviderDegraded) this.warnings.length = 0;
       const elapsed = Math.round(performance.now() - start);
       this.recordTickTiming(elapsed);
       this.latestSnapshot = snap;

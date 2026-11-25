@@ -283,6 +283,58 @@ describe("System One provider contract, batching, resilience, and config (A2, A5
     },
   );
 
+  it("tracks rolling partial degradation without activating full fallback when only 1 of 3 questions is answered", async () => {
+    let mode: "partial" | "healthy" = "partial";
+    const warnings: string[] = [];
+    const provider = new SystemOneProvider({
+      endpoint: DEFAULT_CONFIG.endpoint,
+      model: DEFAULT_CONFIG.model,
+      timeoutMs: 1000,
+      batch: "always",
+      retryBaseMs: 0,
+      onWarning: (msg) => warnings.push(msg),
+      fetchImpl: async (_url, init) => {
+        const { questions } = JSON.parse(init?.body as string) as {
+          questions: Record<string, Question>;
+        };
+        const answers = Object.fromEntries(
+          Object.keys(questions)
+            .filter((id) => mode === "healthy" || id === "act_bram")
+            .map((id) => [id, { probabilities: { rest: 1 } }]),
+        );
+        return Response.json({ answers });
+      },
+    });
+
+    const question = { type: "choice", instructions: "", criteria: { rest: "" } } as const;
+    const batch = { act_anna: question, act_bram: question, act_cora: question };
+
+    expect(provider.isDegraded).toBe(false);
+    expect(provider.partialFallbackRate).toBe(0);
+
+    for (let i = 0; i < 4; i++) {
+      const res = await provider.decide("", batch, 7);
+      expect(res.meta.provider).toBe("systemone");
+      expect(res.meta.fallbackQuestionIds).toEqual(["act_anna", "act_cora"]);
+      expect(provider.isFallbackActive).toBe(false);
+      expect(provider.isDegraded).toBe(true);
+      expect(provider.partialFallbackRate).toBeCloseTo(2 / 3, 5);
+    }
+
+    // Emits a single degraded warning once the consecutive partial sweep threshold is reached
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain("degraded");
+
+    // Recovers once the rolling window of 10 sweeps clears with healthy responses
+    mode = "healthy";
+    for (let i = 0; i < 10; i++) {
+      await provider.decide("", batch, 7);
+    }
+    expect(provider.isFallbackActive).toBe(false);
+    expect(provider.isDegraded).toBe(false);
+    expect(provider.partialFallbackRate).toBe(0);
+  });
+
   it("continues the simulation with a warning if the endpoint stays unreachable", async () => {
     const warnings: string[] = [];
     const provider = new SystemOneProvider({
