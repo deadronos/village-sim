@@ -73,7 +73,7 @@ const api = new VillageApiClient({
       payload.snapshot.entities,
       payload.snapshot.time,
       payload.snapshot.weather,
-      payload.status.tickMs,
+      payload.status.effectiveTickMs ?? payload.status.tickMs,
     );
   },
 
@@ -84,7 +84,7 @@ const api = new VillageApiClient({
       snapshot.entities,
       snapshot.time,
       snapshot.weather,
-      status.tickMs,
+      status.effectiveTickMs ?? status.tickMs,
       snapshot.events,
     );
   },
@@ -99,7 +99,12 @@ const api = new VillageApiClient({
     hud.resetEvents(events);
     hud.updateSnapshot(snapshot, status);
     scene?.clearBubbles();
-    scene?.syncWorld(snapshot.entities, snapshot.time, snapshot.weather, status.tickMs);
+    scene?.syncWorld(
+      snapshot.entities,
+      snapshot.time,
+      snapshot.weather,
+      status.effectiveTickMs ?? status.tickMs,
+    );
   },
 });
 

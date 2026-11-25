@@ -243,6 +243,12 @@ export class VillageHud {
     this.latestStatus = status;
     this.btnPlay.textContent = status.running ? "Pause" : status.finished ? "Restart" : "Play";
     this.speedSlider.value = String(status.tickMs);
+    const effMs = status.effectiveTickMs ?? status.tickMs;
+    const lastMs = status.lastTickMs ?? 0;
+    this.speedSlider.title =
+      effMs > status.tickMs
+        ? `Target ${status.tickMs}ms · adaptive ${effMs}ms (last tick ${lastMs}ms)`
+        : `Tick interval ${status.tickMs}ms`;
     const providerLabel =
       status.mode === "replay"
         ? `replay (${status.replayFile ?? "jsonl"})`

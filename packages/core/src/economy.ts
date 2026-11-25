@@ -426,6 +426,28 @@ export function runScheduledEconomyEvents(world: WorldState): SimEvent[] {
         gold: pay,
         message: `${time} town mill buys surplus wood from ${entity.name.toLowerCase()} for ${pay}g`,
       });
+    } else if (
+      entity.role === "innkeeper" &&
+      isEvening &&
+      getStock(entity, "stew") >= 5 &&
+      entity.gold < 12
+    ) {
+      const pay = ITEM_PRICES.stew;
+      addStock(entity, "stew", -1);
+      entity.gold += pay;
+      world.totalGoldMinted += pay;
+      pushMemory(entity, `traveler bought stew for ${pay}g`);
+      events.push({
+        day: world.day,
+        tick: world.tick,
+        time,
+        kind: "demand",
+        entityId: entity.id,
+        item: "stew",
+        qty: 1,
+        gold: pay,
+        message: `${time} passing traveler buys stew from ${entity.name.toLowerCase()} for ${pay}g`,
+      });
     }
   }
 
