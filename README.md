@@ -38,7 +38,7 @@ pnpm village run --seed 7 --days 3 --provider scripted
 # Run against a local System One endpoint (e.g. Kev / Jev)
 pnpm village run --seed 7 --days 3 --provider systemone --endpoint http://127.0.0.1:8009/v1/systemone
 
-# Verify deterministic replay reproduces every per-tick SHA-256 state hash
+# Verify the ordered world events and every per-tick SHA-256 state hash
 pnpm village replay runs/seed-7.jsonl
 
 # Inspect the exact serialized instruction & probability distribution for an entity
@@ -47,6 +47,10 @@ pnpm village explain --run runs/seed-7.jsonl --entity anna
 # Start only the live simulation backend server
 pnpm village serve --port 4173 --seed 7 --days 7
 ```
+
+New run logs include ordered world events. If replay diverges, the CLI reports
+the first differing event with its day, time, kind, and participants. Older logs
+still replay using their saved state hashes.
 
 ## Configuration Precedence
 
@@ -70,6 +74,7 @@ DECISION_MAX_BATCH=3              # max entities decided per tick sweep (LoD + p
 DECISION_SAMPLE=weighted          # weighted | argmax
 DECISION_ESCALATE_ON=sampled       # sampled | margin | entropy
 DECISION_MIN_CONF=0.34
+DECISION_RUMOR_MAX_AGE_DAYS=2       # 0 limits prompt rumors to the current day
 DECISION_API_KEY=                 # optional bearer token
 PORT=4173                         # live simulation backend HTTP port (and Vite /api proxy target)
 ```
@@ -81,6 +86,7 @@ PORT=4173                         # live simulation backend HTTP port (and Vite 
 - **Adaptive live server pacing**: `village serve` defaults to `850ms` ticks for `scripted`/`replay` and `2000ms` for `systemone` (unless `--tick-ms` is explicitly set). When a `systemone` tick exceeds the target interval, `LiveSimManager` stretches `effectiveTickMs` and enforces a breathing gap between ticks so the SSE stream never stalls or piles up.
 - **System One recovery**: After three consecutive decision sweeps without usable answers, the simulation runs scripted decisions for five seconds before trying System One again. The HUD shows when scripted fallback is active and clears the indicator when System One returns a usable answer.
 - **Confidence escalation**: `DECISION_MIN_CONF` applies to the sampled probability, the gap between the top two probabilities, or one minus normalized entropy, depending on `DECISION_ESCALATE_ON`. The HUD and daily summary show the count and share of decisions escalated to the scripted policy.
+- **Rumors in model prompts**: Dawn and tick prompts include at most one unverified rumor, labeled with its origin day and hop count. The serializer omits rumors older than `DECISION_RUMOR_MAX_AGE_DAYS` and claims contradicted by current stock. Regular gossip expiration still applies. Decision logs show the model-facing prompt. The offline scripted policy keeps its existing scoring inputs for replay compatibility.
 
 ## Verification Commands
 

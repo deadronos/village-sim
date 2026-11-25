@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import {
   DEFAULT_CONFIG,
   ReplayProvider,
@@ -10,6 +11,8 @@ import {
   formatExplainReport,
   parseJsonl,
   serializeJsonl,
+  type EventLogRecord,
+  type SimEvent,
 } from "@village/core";
 import {
   buildResolvedConfig,
@@ -95,6 +98,28 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
   return 0;
 }
 
+function firstEventDivergence(
+  expected: readonly EventLogRecord[],
+  actual: readonly SimEvent[],
+): string | undefined {
+  for (let i = 0; i < Math.max(expected.length, actual.length); i++) {
+    const before = expected[i];
+    const event = actual[i];
+    // Compare the exact JSON representation, including payloads but ignoring key order.
+    const after = event ? JSON.stringify({ ...event, recordType: "event" }) : undefined;
+    if (before && after && isDeepStrictEqual(before, JSON.parse(after))) continue;
+
+    const context = (before ?? event)!;
+    const entities = [context.entityId, context.otherEntityId].filter(Boolean).join("→");
+    const location = entities || context.place;
+    return [
+      `first divergence: day ${context.day} ${context.time} ${context.kind}${location ? ` ${location}` : ""} (tick ${context.tick})`,
+      `  expected: ${before ? JSON.stringify(before) : "(end of events)"}`,
+      `  actual:   ${after ?? "(end of events)"}`,
+    ].join("\n");
+  }
+}
+
 async function cmdReplay(
   positional: string[],
   flags: Record<string, string | boolean>,
@@ -121,9 +146,11 @@ async function cmdReplay(
       sample: parsed.header.sample,
       escalateOn: parsed.header.escalateOn ?? DEFAULT_CONFIG.escalateOn,
       minConf: parsed.header.minConf,
+      rumorMaxAgeDays: parsed.header.rumorMaxAgeDays ?? DEFAULT_CONFIG.rumorMaxAgeDays,
       maxBatch: parsed.header.maxBatch ?? DEFAULT_CONFIG.maxBatch,
       ticksPerDay: parsed.header.ticksPerDay,
       minutesPerTick: parsed.header.minutesPerTick,
+      startHour: parsed.header.startHour ?? DEFAULT_CONFIG.startHour,
       provider: "replay",
       quiet,
     },
@@ -131,6 +158,14 @@ async function cmdReplay(
   );
 
   const result = await sim.runAllDays();
+  const verifyEvents = parsed.header.eventsRecorded || parsed.events.length > 0;
+  if (verifyEvents) {
+    const divergence = firstEventDivergence(parsed.events, result.events);
+    if (divergence) {
+      console.error(`REPLAY MISMATCH — ${divergence}`);
+      return 1;
+    }
+  }
   const expectedHashes = parsed.tickHashes.map((t) => t.state_hash);
   const actualHashes = result.tickHashes.map((t) => t.state_hash);
 
@@ -153,6 +188,7 @@ async function cmdReplay(
     console.log(
       `Replay verified (${actualHashes.length} ticks across ${parsed.header.days} day(s)).`,
     );
+    if (verifyEvents) console.log(`Event sequence verified (${result.events.length} events).`);
     console.log(`Final state hash: ${result.finalStateHash}`);
   }
   return 0;

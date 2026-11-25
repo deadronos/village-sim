@@ -346,9 +346,12 @@ export function tryCozySurplusExchange(
   };
 }
 
-export function getTopRumor(entity: Entity): Rumor | undefined {
-  if (entity.rumors.length === 0) return undefined;
-  return entity.rumors.toSorted((a, b) => {
+export function getTopRumor(
+  entity: Entity,
+  eligible?: (rumor: Rumor) => boolean,
+): Rumor | undefined {
+  const rumors = eligible ? entity.rumors.filter(eligible) : entity.rumors;
+  return rumors.toSorted((a, b) => {
     if (b.originDay !== a.originDay) return b.originDay - a.originDay;
     if (b.originTick !== a.originTick) return b.originTick - a.originTick;
     if (a.hops !== b.hops) return a.hops - b.hops;

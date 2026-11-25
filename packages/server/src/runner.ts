@@ -378,9 +378,11 @@ export class LiveSimManager {
       sample: parsed.header.sample,
       escalateOn: parsed.header.escalateOn ?? DEFAULT_CONFIG.escalateOn,
       minConf: parsed.header.minConf,
+      rumorMaxAgeDays: parsed.header.rumorMaxAgeDays ?? DEFAULT_CONFIG.rumorMaxAgeDays,
       maxBatch: parsed.header.maxBatch ?? DEFAULT_CONFIG.maxBatch,
       ticksPerDay: parsed.header.ticksPerDay,
       minutesPerTick: parsed.header.minutesPerTick,
+      startHour: parsed.header.startHour ?? DEFAULT_CONFIG.startHour,
       provider: "replay",
     };
     if (!this.customTickMs) {

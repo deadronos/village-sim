@@ -1,8 +1,15 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { DEFAULT_CONFIG } from "@village/core";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  DEFAULT_CONFIG,
+  ScriptedProvider,
+  VillageSimulation,
+  serializeJsonl,
+  type JsonlRecord,
+} from "@village/core";
 import {
   DEFAULT_LIVE_TICK_MS,
   DEFAULT_SYSTEMONE_TICK_MS,
@@ -18,11 +25,23 @@ import {
   type StreamMessage,
 } from "../src/index.ts";
 
+const scriptedEventFixture = fileURLToPath(
+  new URL("./fixtures/scripted-events.jsonl", import.meta.url),
+);
+
+function readScriptedEventFixture(): JsonlRecord[] {
+  return readFileSync(scriptedEventFixture, "utf8")
+    .trimEnd()
+    .split("\n")
+    .map((line) => JSON.parse(line) as JsonlRecord);
+}
+
 describe("CLI and live backend server", () => {
   let server: LiveServerHandle | null = null;
   let tempDir: string | null = null;
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (server) {
       await server.close();
       server = null;
@@ -31,6 +50,90 @@ describe("CLI and live backend server", () => {
       rmSync(tempDir, { recursive: true, force: true });
       tempDir = null;
     }
+  });
+
+  it("verifies the ordered events and hashes of the golden scripted run", async () => {
+    const output = vi.spyOn(console, "log").mockImplementation(() => {});
+    expect(await runCli(["replay", scriptedEventFixture])).toBe(0);
+    expect(output).toHaveBeenCalledWith("Replay verified (14 ticks across 2 day(s)).");
+    expect(output).toHaveBeenCalledWith("Event sequence verified (103 events).");
+  });
+
+  it("replays event times from a run with a configured start hour", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-start-hour-"));
+    const config = join(tempDir, "village.config.json");
+    const out = join(tempDir, "run.jsonl");
+    writeFileSync(
+      config,
+      JSON.stringify({ provider: "scripted", startHour: 7, days: 1, ticksPerDay: 2 }),
+      "utf8",
+    );
+
+    expect(
+      await runCli(["run", "--provider", "scripted", "--config", config, "--out", out, "--quiet"]),
+    ).toBe(0);
+    expect(await runCli(["replay", out, "--quiet"])).toBe(0);
+  });
+
+  it("reconstructs live replay prompts with the saved rumor age limit", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-rumor-replay-"));
+    const config = { ...DEFAULT_CONFIG, days: 2, ticksPerDay: 7, rumorMaxAgeDays: 0 };
+    const run = await new VillageSimulation(config, new ScriptedProvider()).runAllDays();
+    writeFileSync(join(tempDir, "run.jsonl"), serializeJsonl(run.records), "utf8");
+    const manager = new LiveSimManager(DEFAULT_CONFIG, { runsDir: tempDir });
+    manager.startReplay("run.jsonl");
+    manager.pause();
+    for (let tick = 0; tick <= config.ticksPerDay; tick++) await manager.stepOnce();
+
+    const isSecondDawn = (record: (typeof run.decisions)[number]) =>
+      record.day === 2 && record.question_id === "dawn_anna";
+    const original = run.decisions.find(isSecondDawn)!;
+    const replayed = manager.getDecisions().find(isSecondDawn)!;
+    expect(replayed.instructions).toBe(original.instructions);
+    expect(replayed.instructions).not.toContain("Unverified rumor (day 1,");
+  });
+
+  it("reports the first changed trade even when all saved hashes match", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-event-replay-"));
+    const path = join(tempDir, "trade-price.jsonl");
+    const records = readScriptedEventFixture();
+    const trade = records.find(
+      (record) => record.recordType === "event" && record.kind === "trade" && record.day === 2,
+    );
+    if (!trade || trade.recordType !== "event")
+      throw new Error("Fixture is missing its day-two trade");
+    trade.gold = trade.gold! + 1;
+    trade.message = trade.message.replace("6g", "7g");
+    writeFileSync(path, serializeJsonl(records), "utf8");
+
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await runCli(["replay", path, "--quiet"])).toBe(1);
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("first divergence: day 2 07:30 trade torin→cora (tick 6)"),
+    );
+    expect(error.mock.calls[0]?.[0]).toContain("for 7g");
+    expect(error.mock.calls[0]?.[0]).toContain("for 6g");
+  });
+
+  it("detects missing event records and still verifies hashes in older logs", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-legacy-replay-"));
+    const path = join(tempDir, "run.jsonl");
+    const records = readScriptedEventFixture().filter((record) => record.recordType !== "event");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    writeFileSync(path, serializeJsonl(records), "utf8");
+    expect(await runCli(["replay", path, "--quiet"])).toBe(1);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("expected: (end of events)"));
+
+    const header = records.find((record) => record.recordType === "header")!;
+    delete header.eventsRecorded;
+    writeFileSync(path, serializeJsonl(records), "utf8");
+    expect(await runCli(["replay", path, "--quiet"])).toBe(0);
+
+    const tick = records.find((record) => record.recordType === "tick")!;
+    tick.state_hash = "changed";
+    writeFileSync(path, serializeJsonl(records), "utf8");
+    expect(await runCli(["replay", path, "--quiet"])).toBe(1);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("REPLAY MISMATCH at tick index 0"));
   });
 
   it("runs CLI run -> replay -> explain end-to-end with exact hash verification", async () => {

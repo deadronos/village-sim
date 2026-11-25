@@ -222,16 +222,19 @@ export class VillageSimulation {
     const header: HeaderLogRecord = {
       recordType: "header",
       version: provider instanceof ReplayProvider ? provider.runVersion : 2,
+      eventsRecorded: true,
       seed: config.seed,
       provider: config.provider,
       model: config.model,
       sample: config.sample,
       escalateOn: config.escalateOn,
       minConf: config.minConf,
+      rumorMaxAgeDays: config.rumorMaxAgeDays,
       maxBatch: config.maxBatch,
       days: config.days,
       ticksPerDay: config.ticksPerDay,
       minutesPerTick: config.minutesPerTick,
+      startHour: config.startHour,
     };
     this.records.push(header);
   }
@@ -255,7 +258,11 @@ export class VillageSimulation {
     const stateSummary = serializeWorldState(world);
     const questions: Record<string, Question> = {};
     for (const entity of world.entities) {
-      questions[`dawn_${entity.id}`] = buildDawnQuestion(world, entity);
+      questions[`dawn_${entity.id}`] = buildDawnQuestion(
+        world,
+        entity,
+        this.config.rumorMaxAgeDays,
+      );
     }
 
     if (this.provider instanceof ReplayProvider) {
@@ -892,7 +899,12 @@ export class VillageSimulation {
       for (const entity of idleEntities) {
         const criteria = getGatedActions(world, entity, legacyHungerOverride);
         criteriaByEntity.set(entity.id, criteria);
-        questions[`act_${entity.id}`] = buildTickQuestion(world, entity, criteria);
+        questions[`act_${entity.id}`] = buildTickQuestion(
+          world,
+          entity,
+          criteria,
+          this.config.rumorMaxAgeDays,
+        );
       }
 
       if (this.provider instanceof ReplayProvider) {
@@ -923,7 +935,7 @@ export class VillageSimulation {
         if (!legacyHungerOverride && criteria.buy_food && !hasAffordableFoodSource(world, entity)) {
           if (entity.needs.hunger > 0.8) recordFoodShortage(world, entity);
           criteria = getGatedActions(world, entity);
-          question = buildTickQuestion(world, entity, criteria);
+          question = buildTickQuestion(world, entity, criteria, this.config.rumorMaxAgeDays);
           decisionState = serializeWorldState(world);
           const refreshed = await this.scriptedFallback.decide(
             decisionState,
@@ -1069,12 +1081,15 @@ export class VillageSimulation {
     updateWorldProsperity(world);
     assertWorldInvariants(world);
 
-    // 7. Compute canonical state hash and finalize decision logs
+    // 7. Finalize the tick's decisions and ordered events before its hash record.
     const stateHash = hashWorldState(world);
     for (const rec of tickDecisions) {
       rec.state_hash = stateHash;
       this.records.push(rec);
       this.decisions.push(rec);
+    }
+    for (const event of tickEvents) {
+      this.records.push({ ...event, recordType: "event" });
     }
 
     const tickHashRec: TickHashRecord = {

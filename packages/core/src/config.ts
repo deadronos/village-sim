@@ -10,6 +10,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   sample: "weighted",
   escalateOn: "sampled",
   minConf: 0.34,
+  rumorMaxAgeDays: 2,
   seed: 7,
   days: 3,
   ticksPerDay: 64, // 06:00 to 22:00 at 15-minute ticks
@@ -28,6 +29,7 @@ export interface PartialSimConfig {
   sample?: SampleMode;
   escalateOn?: EscalationMetric;
   minConf?: number;
+  rumorMaxAgeDays?: number;
   apiKey?: string;
   seed?: number;
   days?: number;
@@ -96,6 +98,11 @@ export function configFromEnv(env: Record<string, string | undefined>): PartialS
   }
   const minConf = parseNumber(env.DECISION_MIN_CONF, "DECISION_MIN_CONF");
   if (minConf !== undefined) out.minConf = minConf;
+  const rumorMaxAgeDays = parseNumber(
+    env.DECISION_RUMOR_MAX_AGE_DAYS,
+    "DECISION_RUMOR_MAX_AGE_DAYS",
+  );
+  if (rumorMaxAgeDays !== undefined) out.rumorMaxAgeDays = rumorMaxAgeDays;
 
   if (env.DECISION_API_KEY) {
     out.apiKey = env.DECISION_API_KEY.trim();
@@ -144,6 +151,9 @@ export function resolveConfig(layers: {
   }
   if (merged.minConf < 0 || merged.minConf > 1) {
     throw new Error(`minConf must be between 0 and 1, got ${merged.minConf}`);
+  }
+  if (!Number.isSafeInteger(merged.rumorMaxAgeDays) || merged.rumorMaxAgeDays < 0) {
+    throw new Error(`rumorMaxAgeDays must be an integer >= 0, got ${merged.rumorMaxAgeDays}`);
   }
   if (merged.days < 1) {
     throw new Error(`days must be >= 1, got ${merged.days}`);

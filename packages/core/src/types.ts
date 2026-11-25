@@ -1,9 +1,13 @@
 export type QuestionType = "choice" | "noul" | "score";
 
+// Keep the legacy scripted scoring input off the JSON wire and out of the model prompt.
+export const SCRIPTED_INSTRUCTIONS = Symbol("scriptedInstructions");
+
 export interface ChoiceQuestion {
   type: "choice";
   instructions: string;
   criteria: Record<string, string>;
+  [SCRIPTED_INSTRUCTIONS]?: string;
 }
 
 export interface NoulQuestion {
@@ -69,6 +73,7 @@ export interface SimConfig {
   sample: SampleMode;
   escalateOn: EscalationMetric;
   minConf: number;
+  rumorMaxAgeDays: number;
   apiKey?: string;
   seed: number;
   days: number;
@@ -245,16 +250,19 @@ export interface DecisionLogRecord {
 export interface HeaderLogRecord {
   recordType: "header";
   version: 1 | 2;
+  eventsRecorded?: true;
   seed: number;
   provider: ProviderKind;
   model: string;
   sample: SampleMode;
   escalateOn?: EscalationMetric;
   minConf: number;
+  rumorMaxAgeDays?: number;
   maxBatch?: number;
   days: number;
   ticksPerDay: number;
   minutesPerTick: number;
+  startHour?: number;
 }
 
 export interface TickHashRecord {
@@ -265,7 +273,11 @@ export interface TickHashRecord {
   state_hash: string;
 }
 
-export type JsonlRecord = HeaderLogRecord | DecisionLogRecord | TickHashRecord;
+export interface EventLogRecord extends SimEvent {
+  recordType: "event";
+}
+
+export type JsonlRecord = HeaderLogRecord | DecisionLogRecord | EventLogRecord | TickHashRecord;
 
 export interface DaySummary {
   day: number;
