@@ -223,6 +223,12 @@ pre {
   font-size: 12px;
 }
 
+.btn-toggle.active {
+  background: rgba(111, 183, 255, 0.2);
+  border-color: rgba(111, 183, 255, 0.55);
+  color: #cfe8ff;
+}
+
 .icon-btn {
   width: 28px;
   height: 28px;

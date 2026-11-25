@@ -20,6 +20,9 @@ const hud = new VillageHud({
   onSpeedChange: (tickMs) => {
     void api.setSpeed(tickMs);
   },
+  onToggleBubbles: (enabled) => {
+    scene?.setBubblesEnabled(enabled);
+  },
   onSelectEntity: (entityId) => {
     scene?.setSelectedEntity(entityId);
     hud.selectEntity(entityId, true);
@@ -92,6 +95,7 @@ const api = new VillageApiClient({
     currentStatus = status;
     hud.resetEvents(events);
     hud.updateSnapshot(snapshot, status);
+    scene?.clearBubbles();
     scene?.syncWorld(snapshot.entities, snapshot.time, snapshot.weather, status.tickMs);
   },
 });

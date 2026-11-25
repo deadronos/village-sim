@@ -6,6 +6,7 @@ export interface HudCallbacks {
   onTogglePlay(): void;
   onStep(): void;
   onSpeedChange(tickMs: number): void;
+  onToggleBubbles(enabled: boolean): void;
   onSelectEntity(entityId: string): void;
   onFocusEntity(entityId: string): void;
   onReset(config: PartialSimConfig): void;
@@ -34,7 +35,9 @@ export class VillageHud {
   private readonly btnPlay = el<HTMLButtonElement>("btn-play");
   private readonly btnStep = el<HTMLButtonElement>("btn-step");
   private readonly speedSlider = el<HTMLInputElement>("speed-slider");
+  private readonly btnBubbles = el<HTMLButtonElement>("btn-bubbles");
   private readonly btnSettings = el<HTMLButtonElement>("btn-settings");
+  private bubblesEnabled = true;
 
   private readonly rosterList = el<HTMLDivElement>("roster-list");
   private readonly sidePanel = el<HTMLElement>("side-panel");
@@ -98,6 +101,13 @@ export class VillageHud {
     this.speedSlider.addEventListener("input", () => {
       const val = Number.parseInt(this.speedSlider.value, 10);
       if (Number.isFinite(val)) this.callbacks.onSpeedChange(val);
+    });
+
+    this.btnBubbles.addEventListener("click", () => {
+      this.bubblesEnabled = !this.bubblesEnabled;
+      this.btnBubbles.classList.toggle("active", this.bubblesEnabled);
+      this.btnBubbles.setAttribute("aria-pressed", String(this.bubblesEnabled));
+      this.callbacks.onToggleBubbles(this.bubblesEnabled);
     });
 
     this.tabTimeline.addEventListener("click", () => this.setActiveTab("timeline"));
