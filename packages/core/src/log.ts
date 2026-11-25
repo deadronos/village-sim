@@ -1,6 +1,7 @@
 import type {
   DaySummary,
   DecisionLogRecord,
+  EventLogRecord,
   HeaderLogRecord,
   ItemKind,
   JsonlRecord,
@@ -10,6 +11,7 @@ import type {
 export interface ParsedRunLog {
   header?: HeaderLogRecord;
   decisions: DecisionLogRecord[];
+  events: EventLogRecord[];
   tickHashes: TickHashRecord[];
 }
 
@@ -23,6 +25,7 @@ export function serializeJsonl(records: readonly JsonlRecord[]): string {
 
 export function parseJsonl(content: string): ParsedRunLog {
   const decisions: DecisionLogRecord[] = [];
+  const events: EventLogRecord[] = [];
   const tickHashes: TickHashRecord[] = [];
   let header: HeaderLogRecord | undefined;
 
@@ -35,12 +38,14 @@ export function parseJsonl(content: string): ParsedRunLog {
       header = parsed;
     } else if (parsed.recordType === "decision") {
       decisions.push(parsed);
+    } else if (parsed.recordType === "event") {
+      events.push(parsed);
     } else if (parsed.recordType === "tick") {
       tickHashes.push(parsed);
     }
   }
 
-  return { header, decisions, tickHashes };
+  return { header, decisions, events, tickHashes };
 }
 
 export function percentile(values: readonly number[], p: number): number {

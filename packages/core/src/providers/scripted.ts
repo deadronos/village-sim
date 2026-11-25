@@ -1,4 +1,10 @@
-import type { Answer, DecisionProvider, ProviderResult, Question } from "../types.ts";
+import {
+  SCRIPTED_INSTRUCTIONS,
+  type Answer,
+  type DecisionProvider,
+  type ProviderResult,
+  type Question,
+} from "../types.ts";
 
 function parseFloatMetric(text: string, label: string, fallback: number): number {
   const regex = new RegExp(`${label}\\s+([0-9]+(?:\\.[0-9]+)?)`, "i");
@@ -202,9 +208,10 @@ export class ScriptedProvider implements DecisionProvider {
       if (question.type === "choice") {
         const keys = Object.keys(question.criteria).toSorted();
         const isDawn = qId.startsWith("dawn_");
+        const instructions = question[SCRIPTED_INSTRUCTIONS] ?? question.instructions;
         const probabilities = isDawn
-          ? scoreDawnFocus(question.instructions, stateSummary, keys)
-          : scoreTickAction(question.instructions, stateSummary, keys);
+          ? scoreDawnFocus(instructions, stateSummary, keys)
+          : scoreTickAction(instructions, stateSummary, keys);
 
         let bestChoice = keys[0] ?? "";
         let bestProb = -1;

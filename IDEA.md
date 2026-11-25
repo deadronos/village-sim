@@ -345,8 +345,11 @@ guard: daily wage      child: allowance from a parent
   another's draws.
 - Persist every decision: `{day, tick, entity, question_id, action,
   probabilities, confidence, provider, seed, state_hash, escalated}` → JSONL.
+- Append world events in emission order within each tick, before that tick's
+  state hash.
 - Compute a canonical state hash (sorted-key JSON → SHA-256) per tick; log it.
-- `--replay decisions.jsonl` must reproduce the identical per-tick hash sequence.
+- `village replay decisions.jsonl` verifies the ordered events and per-tick hash
+  sequence, and reports the first differing event when one exists.
 - Different seeds must produce materially different runs (compare trade counts;
   identical outcomes mean gating or sampling is broken).
 

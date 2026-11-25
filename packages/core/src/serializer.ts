@@ -1,7 +1,17 @@
-import { RECIPES, findSuppliersForItem } from "./economy.ts";
+import { DEFAULT_CONFIG } from "./config.ts";
+import { ITEM_CAPS, RECIPES, findSuppliersForItem } from "./economy.ts";
+import { hasAffordableFoodSource } from "./gating.ts";
 import { getTopBonds, getTopRumor } from "./gossip.ts";
-import type { ChoiceQuestion, Entity, Focus, ItemKind, WorldState } from "./types.ts";
-import { formatSimTime, getStock } from "./world.ts";
+import {
+  SCRIPTED_INSTRUCTIONS,
+  type ChoiceQuestion,
+  type Entity,
+  type Focus,
+  type ItemKind,
+  type Rumor,
+  type WorldState,
+} from "./types.ts";
+import { formatSimTime, getEntityById, getStock } from "./world.ts";
 
 export const DAWN_FOCUS_CRITERIA: Record<Focus, string> = {
   duty: "trade and village work",
@@ -9,6 +19,8 @@ export const DAWN_FOCUS_CRITERIA: Record<Focus, string> = {
   socialize: "talk with neighbors",
   rest: "rest and keep energy up",
 };
+
+const SHARED_STOCK_ITEMS: readonly ItemKind[] = ["wheat", "bread", "stew", "wood"];
 
 function formatInventory(inventory: Partial<Record<ItemKind, number>>): string {
   const entries = (Object.entries(inventory) as Array<[ItemKind, number]>)
@@ -18,33 +30,85 @@ function formatInventory(inventory: Partial<Record<ItemKind, number>>): string {
   return entries.map(([item, qty]) => `${qty} ${item}`).join(", ");
 }
 
+function availableStock(world: WorldState, item: ItemKind): number {
+  return findSuppliersForItem(world, item, "", 1).reduce((sum, e) => sum + getStock(e, item), 0);
+}
+
 /**
  * Shared world summary placed in the `state` field of a batched System One call.
  * Kept concise (~20-30 tokens) so a 4B model stays well within its <=384-token sweet spot.
  */
 export function serializeWorldState(world: WorldState): string {
   const time = formatSimTime(world.tick, world.minutesPerTick, world.startHour);
-  const breadSupply = findSuppliersForItem(world, "bread", "", 1).reduce(
-    (sum, e) => sum + getStock(e, "bread"),
-    0,
-  );
-  const stewSupply = findSuppliersForItem(world, "stew", "", 1).reduce(
-    (sum, e) => sum + getStock(e, "stew"),
-    0,
-  );
-  const wheatSupply = findSuppliersForItem(world, "wheat", "", 1).reduce(
-    (sum, e) => sum + getStock(e, "wheat"),
-    0,
-  );
-  const woodSupply = findSuppliersForItem(world, "wood", "", 1).reduce(
-    (sum, e) => sum + getStock(e, "wood"),
-    0,
-  );
+  const stocks = SHARED_STOCK_ITEMS.map((item) => `${item} ${availableStock(world, item)}`);
 
   return (
     `Day ${world.day} ${time}, weather ${world.weather}, prosperity ${world.prosperity}. ` +
-    `Stocks: wheat ${wheatSupply}, bread ${breadSupply}, stew ${stewSupply}, wood ${woodSupply}.`
+    `Stocks: ${stocks.join(", ")}.`
   );
+}
+
+function contradictsStock(world: WorldState, rumor: Rumor): boolean {
+  if (rumor.kind !== "surplus" && rumor.kind !== "shortage") return false;
+
+  // Item-specific stock rumors use <kind>:<day>:<subject>:<item>. The summary
+  // pattern also supports older or manually supplied rumors with custom IDs.
+  const [kind, , subjectId, idItem] = rumor.id.split(":");
+  const itemFromId = kind === rumor.kind && subjectId === rumor.subjectId ? idItem : undefined;
+  const subject = getEntityById(world, rumor.subjectId);
+  if (rumor.kind === "shortage" && itemFromId === "food") {
+    return subject !== undefined && hasAffordableFoodSource(world, subject);
+  }
+  const itemFromSummary =
+    rumor.kind === "surplus"
+      ? / has surplus ([a-z]+)\.?$/i.exec(rumor.summary)?.[1]
+      : / is short on ([a-z]+)\.?$/i.exec(rumor.summary)?.[1];
+  const candidate = itemFromId ?? itemFromSummary?.toLowerCase();
+  if (!candidate || !Object.hasOwn(ITEM_CAPS, candidate)) return false;
+
+  const item = candidate as ItemKind;
+  if (rumor.kind === "surplus") {
+    return (
+      (subject !== undefined && getStock(subject, item) === 0) ||
+      (SHARED_STOCK_ITEMS.includes(item) && availableStock(world, item) === 0)
+    );
+  }
+  // Stock elsewhere in town does not contradict a villager's own shortage.
+  return (
+    subject !== undefined && getStock(subject, item) >= (RECIPES[subject.role]?.inputs[item] ?? 1)
+  );
+}
+
+function rumorInstructions(
+  world: WorldState,
+  entity: Entity,
+  maxAgeDays: number,
+  render: (memory: readonly string[], hint: string) => string,
+): Pick<ChoiceQuestion, "instructions" | typeof SCRIPTED_INSTRUCTIONS> {
+  const recent = entity.memory.filter((entry) => !entry.startsWith("heard from "));
+  const rumor = getTopRumor(
+    entity,
+    (candidate) =>
+      candidate.originDay <= world.day &&
+      world.day - candidate.originDay <= maxAgeDays &&
+      !contradictsStock(world, candidate),
+  );
+  const modelHint = rumor
+    ? ` Unverified rumor (day ${rumor.originDay}, ${rumor.hops} ${rumor.hops === 1 ? "hop" : "hops"}): ${rumor.summary}.`
+    : "";
+  const legacyRumor = getTopRumor(entity);
+
+  return {
+    instructions: render(recent, modelHint),
+    [SCRIPTED_INSTRUCTIONS]: render(
+      entity.memory,
+      legacyRumor ? ` Heard: ${legacyRumor.summary}.` : "",
+    ),
+  };
+}
+
+function formatRecent(memory: readonly string[], fallback: string): string {
+  return memory.length > 0 ? memory.slice(-2).join("; ") : fallback;
 }
 
 /**
@@ -53,9 +117,8 @@ export function serializeWorldState(world: WorldState): string {
  * for a stateless typed-decision provider without duplicating shared world state
  * or leaking peer confidences.
  */
-export function serializeEntityInstruction(world: WorldState, entity: Entity): string {
+function entityInstructions(world: WorldState, entity: Entity, rumorMaxAgeDays: number) {
   const carrying = formatInventory(entity.inventory);
-  const recent = entity.memory.length > 0 ? entity.memory.slice(-2).join("; ") : "quiet morning";
 
   const recipe = RECIPES[entity.role];
   let supplyHint = "";
@@ -74,43 +137,62 @@ export function serializeEntityInstruction(world: WorldState, entity: Entity): s
       ? ` Closest: ${topBond.entity.name.toLowerCase()} (${topBond.tier}).`
       : "";
 
-  const topRumor = getTopRumor(entity);
-  const rumorHint = topRumor ? ` Heard: ${topRumor.summary}.` : "";
-
-  return (
+  const prefix =
     `${entity.name.toLowerCase()} the ${entity.role} at ${entity.location}. ` +
     `Gold ${entity.gold}g, carrying ${carrying}.${supplyHint} ` +
     `Hunger ${entity.needs.hunger.toFixed(2)}, energy ${entity.needs.energy.toFixed(2)}, ` +
     `social ${entity.needs.social.toFixed(2)}, meals ${entity.mealsToday}. ` +
-    `Duty: ${entity.duty}. Focus: ${entity.focus}. ` +
-    `Recent: ${recent}.${bondHint}${rumorHint}`
+    `Duty: ${entity.duty}. Focus: ${entity.focus}. `;
+  return rumorInstructions(
+    world,
+    entity,
+    rumorMaxAgeDays,
+    (memory, hint) =>
+      `${prefix}Recent: ${formatRecent(memory, "quiet morning")}.${bondHint}${hint}`,
   );
+}
+
+export function serializeEntityInstruction(
+  world: WorldState,
+  entity: Entity,
+  rumorMaxAgeDays = DEFAULT_CONFIG.rumorMaxAgeDays,
+): string {
+  return entityInstructions(world, entity, rumorMaxAgeDays).instructions;
 }
 
 export function buildTickQuestion(
   world: WorldState,
   entity: Entity,
   criteria: Record<string, string>,
+  rumorMaxAgeDays = DEFAULT_CONFIG.rumorMaxAgeDays,
 ): ChoiceQuestion {
   return {
     type: "choice",
-    instructions: serializeEntityInstruction(world, entity),
+    ...entityInstructions(world, entity, rumorMaxAgeDays),
     criteria,
   };
 }
 
-export function buildDawnQuestion(world: WorldState, entity: Entity): ChoiceQuestion {
+export function buildDawnQuestion(
+  world: WorldState,
+  entity: Entity,
+  rumorMaxAgeDays = DEFAULT_CONFIG.rumorMaxAgeDays,
+): ChoiceQuestion {
   const carrying = formatInventory(entity.inventory);
-  const recent = entity.memory.length > 0 ? entity.memory.slice(-2).join("; ") : "fresh dawn";
-  const topRumor = getTopRumor(entity);
-  const rumorHint = topRumor ? ` Heard: ${topRumor.summary}.` : "";
+  const prefix =
+    `Dawn: ${entity.name.toLowerCase()} the ${entity.role} at ${entity.home}. ` +
+    `Gold ${entity.gold}g, carrying ${carrying}. ` +
+    `Energy ${entity.needs.energy.toFixed(2)}, social ${entity.needs.social.toFixed(2)}. ` +
+    `Duty: ${entity.duty}. `;
   return {
     type: "choice",
-    instructions:
-      `Dawn: ${entity.name.toLowerCase()} the ${entity.role} at ${entity.home}. ` +
-      `Gold ${entity.gold}g, carrying ${carrying}. ` +
-      `Energy ${entity.needs.energy.toFixed(2)}, social ${entity.needs.social.toFixed(2)}. ` +
-      `Duty: ${entity.duty}. Recent: ${recent}.${rumorHint} Pick focus.`,
+    ...rumorInstructions(
+      world,
+      entity,
+      rumorMaxAgeDays,
+      (memory, hint) =>
+        `${prefix}Recent: ${formatRecent(memory, "fresh dawn")}.${hint} Pick focus.`,
+    ),
     criteria: { ...DAWN_FOCUS_CRITERIA },
   };
 }

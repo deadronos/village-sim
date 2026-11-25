@@ -64,7 +64,7 @@ describe("Prompt compactness, LoD cadence, and bounded batch size (Issue #2)", (
     expect(instr).toContain("produced 2 bread");
     expect(instr).toContain("Needs: wheat, water.");
     expect(instr).toContain("Closest: bram (close).");
-    expect(instr).toContain("Heard: dorn has surplus wheat.");
+    expect(instr).toContain("Unverified rumor (day 1, 0 hops): dorn has surplus wheat.");
     // Tight ~55-90 token budget (<= 340 chars even in worst-case with bond + rumor + missing inputs)
     expect(instr.length).toBeLessThan(340);
     expect(dawnQ.instructions.length).toBeLessThan(280);

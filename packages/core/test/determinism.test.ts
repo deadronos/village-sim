@@ -63,7 +63,17 @@ describe("Determinism, living economy, replay, and auditability (A1, A3, A4, A7,
     const parsed = parseJsonl(jsonl);
 
     expect(parsed.header?.seed).toBe(7);
+    expect(parsed.header?.eventsRecorded).toBe(true);
     expect(parsed.decisions.length).toBeGreaterThan(0);
+    expect(parsed.events).toEqual(
+      origResult.events.map((event) => ({ recordType: "event", ...event })),
+    );
+
+    const firstTick = origResult.records.findIndex((record) => record.recordType === "tick");
+    expect(origResult.records[0]?.recordType).toBe("header");
+    expect(
+      origResult.records.slice(1, firstTick).some((record) => record.recordType === "event"),
+    ).toBe(true);
 
     const replaySim = new VillageSimulation(
       {
@@ -83,6 +93,7 @@ describe("Determinism, living economy, replay, and auditability (A1, A3, A4, A7,
       parsed.tickHashes.map((h) => h.state_hash),
     );
     expect(replayResult.finalStateHash).toBe(origResult.finalStateHash);
+    expect(replayResult.events).toEqual(origResult.events);
   });
 
   it("records full probability distributions and explains exact instructions sent (A8)", async () => {
