@@ -1,4 +1,4 @@
-import type { BatchMode, ProviderKind, SampleMode, SimConfig } from "./types.ts";
+import type { BatchMode, EscalationMetric, ProviderKind, SampleMode, SimConfig } from "./types.ts";
 
 export const DEFAULT_CONFIG: SimConfig = {
   provider: "scripted",
@@ -8,6 +8,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   batch: "auto",
   maxBatch: 3,
   sample: "weighted",
+  escalateOn: "sampled",
   minConf: 0.34,
   seed: 7,
   days: 3,
@@ -25,6 +26,7 @@ export interface PartialSimConfig {
   batch?: BatchMode;
   maxBatch?: number;
   sample?: SampleMode;
+  escalateOn?: EscalationMetric;
   minConf?: number;
   apiKey?: string;
   seed?: number;
@@ -39,6 +41,7 @@ export interface PartialSimConfig {
 const VALID_PROVIDERS = new Set<ProviderKind>(["systemone", "scripted", "replay"]);
 const VALID_BATCH = new Set<BatchMode>(["auto", "always", "never"]);
 const VALID_SAMPLE = new Set<SampleMode>(["weighted", "argmax"]);
+const VALID_ESCALATION_METRICS = new Set<EscalationMetric>(["sampled", "margin", "entropy"]);
 
 function parseNumber(value: string | undefined, name: string): number | undefined {
   if (value === undefined || value === "") return undefined;
@@ -84,6 +87,13 @@ export function configFromEnv(env: Record<string, string | undefined>): PartialS
     }
     out.sample = s;
   }
+  if (env.DECISION_ESCALATE_ON) {
+    const metric = env.DECISION_ESCALATE_ON.trim() as EscalationMetric;
+    if (!VALID_ESCALATION_METRICS.has(metric)) {
+      throw new Error(`Invalid DECISION_ESCALATE_ON: ${metric}`);
+    }
+    out.escalateOn = metric;
+  }
   const minConf = parseNumber(env.DECISION_MIN_CONF, "DECISION_MIN_CONF");
   if (minConf !== undefined) out.minConf = minConf;
 
@@ -128,6 +138,9 @@ export function resolveConfig(layers: {
   }
   if (!VALID_SAMPLE.has(merged.sample)) {
     throw new Error(`Invalid sample mode: ${String(merged.sample)}`);
+  }
+  if (!VALID_ESCALATION_METRICS.has(merged.escalateOn)) {
+    throw new Error(`Invalid escalation metric: ${String(merged.escalateOn)}`);
   }
   if (merged.minConf < 0 || merged.minConf > 1) {
     throw new Error(`minConf must be between 0 and 1, got ${merged.minConf}`);

@@ -75,7 +75,7 @@ describe("Determinism, living economy, replay, and auditability (A1, A3, A4, A7,
         maxBatch: parsed.header!.maxBatch ?? DEFAULT_CONFIG.maxBatch,
         provider: "replay",
       },
-      new ReplayProvider(parsed.decisions),
+      new ReplayProvider(parsed.decisions, parsed.header!.version),
     );
     const replayResult = await replaySim.runAllDays();
 

@@ -134,6 +134,7 @@ DECISION_MODEL      = kev-latest
 DECISION_TIMEOUT_MS = 120000
 DECISION_BATCH      = auto | always | never              (default: auto)
 DECISION_SAMPLE     = weighted | argmax                 (default: weighted)
+DECISION_ESCALATE_ON = sampled | margin | entropy       (default: sampled)
 DECISION_MIN_CONF   = 0.34       # below this, escalate (see §7.3)
 DECISION_API_KEY    = (optional) bearer token, sent only if set
 ```
@@ -189,9 +190,11 @@ Notes that cost time if ignored:
 - `DECISION_BATCH=auto`: batch when ≥2 entities need a decision this tick;
   otherwise single question.
 - If a batched call fails, retry once per-entity (bounded, exponential backoff),
-  then fall back to the scripted provider for that tick.
-- If the server is unreachable for the whole run, switch permanently to scripted
-  and print a warning — never crash the simulation because a model is down.
+  then use scripted fallback for questions without usable answers.
+- Three consecutive sweeps without usable answers activate scripted fallback
+  and publish a warning to the live viewer. Retry on the first decision sweep
+  after five seconds. Any usable answer restores System One and resets the
+  failure streak.
 
 Measured on a 4B Kev model (Apple M4, MPS) — use these to size the loop:
 
@@ -268,16 +271,28 @@ supply chain?) over pure distance; measure both if time permits.
 | `socialize` | `social < 0.75` |
 | `patrol` | role == guard |
 | `wander` | role == child **or** nothing else is offered |
-| **override** | `hunger > 0.8` → offer **only** `buy_food` |
+| **override** | `hunger > 0.8` and food is carried or affordable from a stocked seller → offer **only** `buy_food` |
 
 Never offer an action whose prerequisite is absent (nobody sells wheat, nobody
 is present to talk to). A futile retry loop burns a whole simulated day.
+When an urgently hungry villager has no affordable food, record a shortage rumor
+and allow their other feasible actions. A villager at maximum hunger with no
+meal available can receive emergency relief without attempting a new purchase.
 
 ### 7.3 Confidence escalation
 
-- `P(sampled) >= DECISION_MIN_CONF` → execute.
-- Below threshold → use the scripted provider's choice for that entity this tick
-  and log `escalated: true`.
+The escalation metric applies to valid model decisions at dawn and during ticks.
+
+- `sampled` (default) uses the probability of the sampled action.
+- `margin` uses the difference between the two highest probabilities.
+- `entropy` uses one minus the Shannon entropy normalized over all gated options.
+  A single available option has confidence 1.
+
+If the metric is below `DECISION_MIN_CONF`, use the scripted policy for that
+decision and log `escalated: true`. The decision log's `confidence` field
+continues to record the sampled probability. The daily summary and live HUD
+show escalation count and percentage across all decision attempts in their
+respective reporting periods.
 - Stretch: route low-confidence social decisions to a text model for a line of
   dialogue. Never let that path affect the world state.
 
@@ -343,7 +358,7 @@ guard: daily wage      child: allowance from a parent
 - `--explain <entity>`: print the exact serialised instruction and the
   distribution for that entity's last decision.
 - End-of-day table: gold, meals, stock per entity; trades; meals; calls;
-  latency p50/p95; fallback rate.
+  latency p50/p95; fallback and escalation rates.
 - `--quiet` for batch runs; JSONL is always written.
 
 ---

@@ -40,6 +40,7 @@ Options (CLI > env > .env > village.config.json > defaults):
   --batch <mode>        auto | always | never (env: DECISION_BATCH)
   --max-batch <n>       Max entities decided per tick (env: DECISION_MAX_BATCH, default: ${DEFAULT_CONFIG.maxBatch})
   --sample <mode>       weighted | argmax (env: DECISION_SAMPLE)
+  --escalate-on <mode>  sampled | margin | entropy (env: DECISION_ESCALATE_ON)
   --min-conf <0..1>     Escalation threshold (env: DECISION_MIN_CONF)
   --timeout-ms <ms>     Request timeout (env: DECISION_TIMEOUT_MS)
   --api-key <token>     Optional bearer token (env: DECISION_API_KEY)
@@ -118,6 +119,7 @@ async function cmdReplay(
       seed: parsed.header.seed,
       days: parsed.header.days,
       sample: parsed.header.sample,
+      escalateOn: parsed.header.escalateOn ?? DEFAULT_CONFIG.escalateOn,
       minConf: parsed.header.minConf,
       maxBatch: parsed.header.maxBatch ?? DEFAULT_CONFIG.maxBatch,
       ticksPerDay: parsed.header.ticksPerDay,
@@ -125,7 +127,7 @@ async function cmdReplay(
       provider: "replay",
       quiet,
     },
-    new ReplayProvider(parsed.decisions),
+    new ReplayProvider(parsed.decisions, parsed.header.version),
   );
 
   const result = await sim.runAllDays();

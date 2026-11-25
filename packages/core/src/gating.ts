@@ -142,12 +142,19 @@ export const GATING_RULES: readonly GatingRule[] = [
 
 /**
  * Computes the gated option map (action -> human description) for an entity.
- * Override: hunger > 0.8 offers ONLY buy_food.
+ * Override: hunger > 0.8 offers only buy_food when a meal is available.
  * Fallback: child always gets wander, and any entity with no other options gets wander.
  */
-export function getGatedActions(world: WorldState, entity: Entity): Record<string, string> {
+export function getGatedActions(
+  world: WorldState,
+  entity: Entity,
+  legacyHungerOverride = false,
+): Record<string, string> {
   // Hard survival override (§7.2 & A6)
-  if (entity.needs.hunger > 0.8) {
+  if (
+    entity.needs.hunger > 0.8 &&
+    (legacyHungerOverride || hasAffordableFoodSource(world, entity))
+  ) {
     return { buy_food: "eat urgently" };
   }
 

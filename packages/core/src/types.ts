@@ -46,6 +46,7 @@ export interface ProviderResult {
 
 export interface DecisionProvider {
   readonly name: string;
+  readonly isFallbackActive?: boolean;
   decide(
     state: string | Record<string, unknown>,
     questions: Record<string, Question>,
@@ -56,6 +57,7 @@ export interface DecisionProvider {
 export type ProviderKind = "systemone" | "scripted" | "replay";
 export type BatchMode = "auto" | "always" | "never";
 export type SampleMode = "weighted" | "argmax";
+export type EscalationMetric = "sampled" | "margin" | "entropy";
 
 export interface SimConfig {
   provider: ProviderKind;
@@ -65,6 +67,7 @@ export interface SimConfig {
   batch: BatchMode;
   maxBatch: number;
   sample: SampleMode;
+  escalateOn: EscalationMetric;
   minConf: number;
   apiKey?: string;
   seed: number;
@@ -241,11 +244,12 @@ export interface DecisionLogRecord {
 
 export interface HeaderLogRecord {
   recordType: "header";
-  version: 1;
+  version: 1 | 2;
   seed: number;
   provider: ProviderKind;
   model: string;
   sample: SampleMode;
+  escalateOn?: EscalationMetric;
   minConf: number;
   maxBatch?: number;
   days: number;
@@ -335,5 +339,7 @@ export interface TickSnapshot {
     totalGold: number;
     providerCalls: number;
     fallbackRate: number;
+    escalatedDecisions: number;
+    escalationRate: number;
   };
 }

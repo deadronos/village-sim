@@ -189,7 +189,101 @@ describe("System One provider contract, batching, resilience, and config (A2, A5
     expect(annaDecision?.fallback).toBe(true);
   });
 
-  it("switches permanently to scripted with a warning if endpoint is unreachable", async () => {
+  it.each(["never", "always"] as const)(
+    "recovers from transient failures and probes after a sustained outage (%s)",
+    async (batch) => {
+      let now = 0;
+      let requests = 0;
+      let response: "offline" | "unavailable" | "partial" | "healthy" = "offline";
+      let holdResponse: Promise<void> | undefined;
+      const warnings: string[] = [];
+      const provider = new SystemOneProvider({
+        endpoint: DEFAULT_CONFIG.endpoint,
+        model: DEFAULT_CONFIG.model,
+        timeoutMs: 1000,
+        batch,
+        retryBaseMs: 0,
+        now: () => now,
+        onWarning: (message) => warnings.push(message),
+        fetchImpl: async (_url, init) => {
+          requests += 1;
+          if (response === "offline") throw new TypeError("fetch failed");
+          if (response === "unavailable") return new Response(null, { status: 503 });
+          if (holdResponse) await holdResponse;
+          const { questions } = JSON.parse(init?.body as string) as {
+            questions: Record<string, Question>;
+          };
+          const answers = Object.fromEntries(
+            Object.keys(questions)
+              .filter((id) => response !== "partial" || id === "act_bram")
+              .map((id) => [id, { probabilities: { rest: 1 } }]),
+          );
+          return Response.json({ answers });
+        },
+      });
+      const question = { type: "choice", instructions: "", criteria: { rest: "" } } as const;
+      const decide = () => provider.decide("", { act_anna: question, act_bram: question }, 7);
+
+      expect((await decide()).meta).toMatchObject({ provider: "scripted", fallbackUsed: true });
+      expect(provider.isFallbackActive).toBe(true);
+      expect(warnings).toHaveLength(0);
+      response = "healthy";
+      expect((await decide()).meta).toMatchObject({ provider: "systemone", fallbackUsed: false });
+      expect(provider.isFallbackActive).toBe(false);
+
+      response = "offline";
+      await decide();
+      await decide();
+      expect(provider.isFallbackActive).toBe(true);
+      expect(warnings).toHaveLength(0);
+      response = "partial";
+      expect((await decide()).meta).toMatchObject({
+        provider: "systemone",
+        fallbackUsed: true,
+        fallbackQuestionIds: ["act_anna"],
+      });
+      expect(provider.isFallbackActive).toBe(false);
+
+      response = "unavailable";
+      await decide();
+      await decide();
+      expect(provider.isFallbackActive).toBe(true);
+      expect(warnings).toHaveLength(0);
+      expect((await decide()).meta).toMatchObject({ provider: "scripted", fallbackUsed: true });
+      expect(provider.isFallbackActive).toBe(true);
+      expect(warnings).toHaveLength(1);
+
+      const requestsAtOutage = requests;
+      now += 4_999;
+      expect((await decide()).meta).toMatchObject({ provider: "scripted", fallbackUsed: true });
+      expect(requests).toBe(requestsAtOutage);
+      now += 1;
+      expect((await decide()).meta).toMatchObject({ provider: "scripted", fallbackUsed: true });
+      expect(requests).toBeGreaterThan(requestsAtOutage);
+      expect(provider.isFallbackActive).toBe(true);
+      expect(warnings).toHaveLength(1);
+
+      const requestsAtFailedProbe = requests;
+      response = "healthy";
+      now += 4_999;
+      await decide();
+      expect(requests).toBe(requestsAtFailedProbe);
+      now += 1;
+      const probeGate = Promise.withResolvers<void>();
+      holdResponse = probeGate.promise;
+      const probe = decide();
+      const requestsAtProbe = requests;
+      const concurrent = decide();
+      const requestsDuringProbe = requests;
+      probeGate.resolve();
+      expect((await concurrent).meta).toMatchObject({ provider: "scripted", fallbackUsed: true });
+      expect(requestsDuringProbe).toBe(requestsAtProbe);
+      expect((await probe).meta).toMatchObject({ provider: "systemone", fallbackUsed: false });
+      expect(provider.isFallbackActive).toBe(false);
+    },
+  );
+
+  it("continues the simulation with a warning if the endpoint stays unreachable", async () => {
     const warnings: string[] = [];
     const provider = new SystemOneProvider({
       endpoint: "http://127.0.0.1:1/v1/systemone",

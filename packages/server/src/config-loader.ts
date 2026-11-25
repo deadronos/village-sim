@@ -10,6 +10,7 @@ import {
   resolveConfig,
   type BatchMode,
   type DecisionProvider,
+  type EscalationMetric,
   type PartialSimConfig,
   type ProviderKind,
   type SampleMode,
@@ -177,6 +178,9 @@ export function configFromFlags(flags: Record<string, string | boolean>): Partia
   const sample = stringFlag(flags, "sample");
   if (sample) out.sample = sample as SampleMode;
 
+  const escalateOn = stringFlag(flags, "escalate-on");
+  if (escalateOn) out.escalateOn = escalateOn as EscalationMetric;
+
   const minConf = numberFlag(flags, "min-conf");
   if (minConf !== undefined) out.minConf = minConf;
 
@@ -240,7 +244,7 @@ export function createProviderForConfig(
       const parsed = parseJsonl(
         readFileSync(resolveFromInvocationCwd(config.replayPath, env), "utf8"),
       );
-      return new ReplayProvider(parsed.decisions);
+      return new ReplayProvider(parsed.decisions, parsed.header?.version);
     }
   }
 }

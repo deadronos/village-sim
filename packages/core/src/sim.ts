@@ -13,7 +13,12 @@ import {
   findSuppliersForItem,
   runScheduledEconomyEvents,
 } from "./economy.ts";
-import { findRestockOption, findSocialPartner, getGatedActions } from "./gating.ts";
+import {
+  findRestockOption,
+  findSocialPartner,
+  getGatedActions,
+  hasAffordableFoodSource,
+} from "./gating.ts";
 import {
   decayRumorsForNewDay,
   maybeRecordFriendshipRumor,
@@ -97,6 +102,38 @@ function emptyTelemetry(): DayTelemetry {
   };
 }
 
+function recordFoodShortage(world: WorldState, entity: Entity): void {
+  recordRumor(entity, {
+    id: `shortage:${world.day}:${entity.id}:food`,
+    kind: "shortage",
+    subjectId: entity.id,
+    summary: `${entity.name.toLowerCase()} cannot find an affordable meal`,
+    day: world.day,
+    tick: world.tick,
+  });
+}
+
+function escalationConfidence(
+  metric: SimConfig["escalateOn"],
+  probabilities: Record<string, number>,
+  sampledProbability: number,
+  optionCount: number,
+): number {
+  if (metric === "margin") {
+    const [highest = 0, second = 0] = Object.values(probabilities).toSorted((a, b) => b - a);
+    return highest - second;
+  }
+  if (metric === "entropy") {
+    if (optionCount <= 1) return 1;
+    const entropy = Object.values(probabilities).reduce(
+      (sum, p) => (p > 0 ? sum - p * Math.log(p) : sum),
+      0,
+    );
+    return clamp01(1 - entropy / Math.log(optionCount));
+  }
+  return sampledProbability;
+}
+
 const ROLE_LOD_COOLDOWN: Record<Entity["role"], number> = {
   baker: 0,
   innkeeper: 0,
@@ -172,6 +209,7 @@ export class VillageSimulation {
   private dayTelemetry: DayTelemetry = emptyTelemetry();
   private totalProviderCalls = 0;
   private totalDecisions = 0;
+  private totalEscalations = 0;
   private totalFallbacks = 0;
   private dawnCompletedForDay = 0;
 
@@ -183,11 +221,12 @@ export class VillageSimulation {
 
     const header: HeaderLogRecord = {
       recordType: "header",
-      version: 1,
+      version: provider instanceof ReplayProvider ? provider.runVersion : 2,
       seed: config.seed,
       provider: config.provider,
       model: config.model,
       sample: config.sample,
+      escalateOn: config.escalateOn,
       minConf: config.minConf,
       maxBatch: config.maxBatch,
       days: config.days,
@@ -199,6 +238,10 @@ export class VillageSimulation {
 
   get isFinished(): boolean {
     return this.world.day > this.config.days;
+  }
+
+  get isProviderFallbackActive(): boolean {
+    return this.provider.isFallbackActive ?? false;
   }
 
   private emitEvent(event: SimEvent, tickEvents: SimEvent[]): void {
@@ -250,7 +293,6 @@ export class VillageSimulation {
         this.config.sample === "argmax" ? pickArgmax(probs) : rng.sampleWeighted(probs);
 
       let chosenFocus = sampled.key as Focus;
-      let escalated = false;
 
       if (!DAWN_FOCUS_CRITERIA[chosenFocus]) {
         usedFallback = true;
@@ -267,8 +309,17 @@ export class VillageSimulation {
         res.meta.provider === "scripted" ||
         dawnReplayRec?.provider === "scripted";
 
-      if (!usedFallback && !isScriptedDawn && sampled.prob < this.config.minConf) {
-        escalated = true;
+      const escalated =
+        dawnReplayRec?.escalated ??
+        (!usedFallback &&
+          !isScriptedDawn &&
+          escalationConfidence(
+            this.config.escalateOn,
+            probs,
+            sampled.prob,
+            Object.keys(question.criteria).length,
+          ) < this.config.minConf);
+      if (escalated) {
         const escSample =
           this.config.sample === "argmax"
             ? pickArgmax(fallbackAns.probabilities)
@@ -287,6 +338,7 @@ export class VillageSimulation {
       }
       if (escalated) {
         this.dayTelemetry.escalatedDecisions += 1;
+        this.totalEscalations += 1;
       }
 
       entity.focus = chosenFocus;
@@ -777,6 +829,8 @@ export class VillageSimulation {
 
     const world = this.world;
     const tickEvents: SimEvent[] = [];
+    const legacyHungerOverride =
+      this.provider instanceof ReplayProvider && this.provider.runVersion === 1;
     const tickDecisions: DecisionLogRecord[] = [];
     const time = formatSimTime(world.tick, world.minutesPerTick, world.startHour);
 
@@ -803,12 +857,21 @@ export class VillageSimulation {
       if (entity.decisionCooldown > 0) {
         entity.decisionCooldown -= 1;
       }
-      // Urgent hunger bypasses LoD cooldown and interrupts non-eating goals
+      // Hunger bypasses LoD cooldown. Only interrupt a goal if a meal is available.
       if (entity.needs.hunger > 0.72) {
         entity.decisionCooldown = 0;
       }
-      if (entity.needs.hunger > 0.8 && entity.goal && entity.goal.kind !== "buy_food") {
-        entity.goal = null;
+      if (entity.needs.hunger > 0.8) {
+        if (legacyHungerOverride || hasAffordableFoodSource(world, entity)) {
+          if (entity.goal?.kind !== "buy_food") entity.goal = null;
+        } else {
+          recordFoodShortage(world, entity);
+          // A meal trip already in progress can request relief when it reaches the seller.
+          if (entity.needs.hunger >= 1 && entity.goal?.kind !== "buy_food") {
+            const relief = applyDeadlockRelief(world, entity);
+            if (relief) this.emitEvent(relief, tickEvents);
+          }
+        }
       }
     }
 
@@ -827,7 +890,7 @@ export class VillageSimulation {
       const criteriaByEntity = new Map<string, Record<string, string>>();
 
       for (const entity of idleEntities) {
-        const criteria = getGatedActions(world, entity);
+        const criteria = getGatedActions(world, entity, legacyHungerOverride);
         criteriaByEntity.set(entity.id, criteria);
         questions[`act_${entity.id}`] = buildTickQuestion(world, entity, criteria);
       }
@@ -851,12 +914,27 @@ export class VillageSimulation {
 
       for (const entity of idleEntities) {
         const qId = `act_${entity.id}`;
-        const question = questions[qId]!;
-        const criteria = criteriaByEntity.get(entity.id)!;
+        let question = questions[qId]!;
+        let criteria = criteriaByEntity.get(entity.id)!;
+        let decisionState = stateSummary;
+        let fallbackAns = scriptedBackup.answers[qId]!;
+
+        // Earlier decisions in this batch can consume the last affordable meal.
+        if (!legacyHungerOverride && criteria.buy_food && !hasAffordableFoodSource(world, entity)) {
+          if (entity.needs.hunger > 0.8) recordFoodShortage(world, entity);
+          criteria = getGatedActions(world, entity);
+          question = buildTickQuestion(world, entity, criteria);
+          decisionState = serializeWorldState(world);
+          const refreshed = await this.scriptedFallback.decide(
+            decisionState,
+            { [qId]: question },
+            world.seed,
+          );
+          fallbackAns = refreshed.answers[qId]!;
+        }
         const allowedKeys = Object.keys(criteria);
 
         const providerAns = res.answers[qId];
-        const fallbackAns = scriptedBackup.answers[qId]!;
 
         // Deterministic validation: keep only probabilities for gated criteria keys
         let usedFallback =
@@ -889,7 +967,6 @@ export class VillageSimulation {
             : rng.sampleWeighted(activeProbs);
 
         let chosenAction = sampled.key as ActionKind;
-        let escalated = false;
 
         // Confidence escalation (§7.3 — not applicable for scripted provider)
         const tickReplayRec =
@@ -901,8 +978,17 @@ export class VillageSimulation {
           res.meta.provider === "scripted" ||
           tickReplayRec?.provider === "scripted";
 
-        if (!usedFallback && !isScriptedTick && sampled.prob < this.config.minConf) {
-          escalated = true;
+        const escalated =
+          tickReplayRec?.escalated ??
+          (!usedFallback &&
+            !isScriptedTick &&
+            escalationConfidence(
+              this.config.escalateOn,
+              activeProbs,
+              sampled.prob,
+              allowedKeys.length,
+            ) < this.config.minConf);
+        if (escalated) {
           const escRng = createStreamRng(world.seed, world.day, world.tick, entity.id, "act_esc");
           const escSample =
             this.config.sample === "argmax"
@@ -925,6 +1011,7 @@ export class VillageSimulation {
         }
         if (escalated) {
           this.dayTelemetry.escalatedDecisions += 1;
+          this.totalEscalations += 1;
         }
 
         // Build deterministic goal and execute immediately if already at destination
@@ -938,6 +1025,8 @@ export class VillageSimulation {
         }
 
         const providerLabel = usedFallback ? this.scriptedFallback.name : res.meta.provider;
+        const decisionInstructions = (usedFallback ? question : questions[qId]!).instructions;
+        const decisionStateSummary = usedFallback ? decisionState : stateSummary;
         entity.lastDecision = {
           day: world.day,
           tick: world.tick,
@@ -947,8 +1036,8 @@ export class VillageSimulation {
           confidence: sampled.prob,
           provider: providerLabel,
           escalated,
-          instructions: question.instructions,
-          worldStateSummary: stateSummary,
+          instructions: decisionInstructions,
+          worldStateSummary: decisionStateSummary,
           criteria: { ...criteria },
         };
 
@@ -968,8 +1057,8 @@ export class VillageSimulation {
           escalated,
           fallback: usedFallback || undefined,
           latency_ms: res.meta.latencyMs,
-          instructions: question.instructions,
-          state_summary: stateSummary,
+          instructions: decisionInstructions,
+          state_summary: decisionStateSummary,
           criteria: { ...criteria },
         };
         tickDecisions.push(decisionRec);
@@ -1068,6 +1157,8 @@ export class VillageSimulation {
         totalGold: world.entities.reduce((sum, e) => sum + e.gold, 0),
         providerCalls: this.totalProviderCalls,
         fallbackRate: this.totalDecisions > 0 ? this.totalFallbacks / this.totalDecisions : 0,
+        escalatedDecisions: this.totalEscalations,
+        escalationRate: this.totalDecisions > 0 ? this.totalEscalations / this.totalDecisions : 0,
       },
     };
 
