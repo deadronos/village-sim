@@ -1,5 +1,7 @@
 # Village Sim
 
+[![CI](https://github.com/deadronos/village-sim/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/deadronos/village-sim/actions/workflows/ci.yml)
+
 An autonomous, deterministic village simulation where 8 inhabitants (farmer, baker, innkeeper, woodcutter, smith, herbalist, guard, child) run their daily lives through a pluggable **typed-decision provider** (System One or offline scripted fallback) while deterministic TypeScript owns the place graph, economy, inventory, gating, and invariants — paired with an interactive **low-poly WebGPU Three.js** 3D village viewer.
 
 ## Screenshot
@@ -97,3 +99,7 @@ pnpm build       # Build core, server, and Vite web bundle
 ## Contributing & History Policy
 
 - **Document history rewrites:** If `main` or another long-lived branch is ever rewritten or recreated (e.g. an orphan branch swap), the commit message and PR description must explicitly state the reason and document any dropped or relocated reference material so provenance is never silently lost.
+
+## License
+
+Village Sim is available under the [MIT License](LICENSE).
