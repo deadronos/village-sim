@@ -4,6 +4,9 @@ import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "@village/core";
 import {
+  DEFAULT_LIVE_TICK_MS,
+  DEFAULT_SYSTEMONE_TICK_MS,
+  LiveSimManager,
   getInvocationCwd,
   resolveFromInvocationCwd,
   runCli,
@@ -82,6 +85,26 @@ describe("CLI and live backend server", () => {
     expect(explainRes.ok).toBe(true);
     const explainJson = (await explainRes.json()) as { report: string };
     expect(explainJson.report).toContain("anna");
+  });
+
+  it("adapts default live tick pacing for systemone vs scripted providers", () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-pace-"));
+    const scriptedMgr = new LiveSimManager(
+      { ...DEFAULT_CONFIG, provider: "scripted" },
+      { runsDir: tempDir },
+    );
+    expect(scriptedMgr.getStatus().tickMs).toBe(DEFAULT_LIVE_TICK_MS);
+    expect(scriptedMgr.getStatus().effectiveTickMs).toBe(DEFAULT_LIVE_TICK_MS);
+
+    // Switching provider via reset adapts default tick interval when user hasn't pinned speed
+    scriptedMgr.reset({ provider: "systemone" });
+    expect(scriptedMgr.getStatus().tickMs).toBe(DEFAULT_SYSTEMONE_TICK_MS);
+    expect(scriptedMgr.getStatus().effectiveTickMs).toBe(DEFAULT_SYSTEMONE_TICK_MS);
+
+    // Explicit setSpeed pins tickMs across resets
+    scriptedMgr.setSpeed(1500);
+    scriptedMgr.reset({ provider: "scripted" });
+    expect(scriptedMgr.getStatus().tickMs).toBe(1500);
   });
 
   it("resolves default and relative CLI paths against INIT_CWD without doubling workspace dirs", async () => {

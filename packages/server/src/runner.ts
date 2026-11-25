@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import {
+  DEFAULT_CONFIG,
   ReplayProvider,
   VillageSimulation,
   cloneEntitiesForSnapshot,
@@ -21,15 +22,35 @@ import {
   resolveFromInvocationCwd,
 } from "./config-loader.ts";
 
+export const DEFAULT_LIVE_TICK_MS = 850;
+export const DEFAULT_SYSTEMONE_TICK_MS = 2000;
+export const MIN_LIVE_TICK_MS = 120;
+export const MAX_LIVE_TICK_MS = 6000;
+const SYSTEMONE_BREATHING_GAP_MS = 150;
+
+export function defaultTickMsForProvider(provider: SimConfig["provider"]): number {
+  return provider === "systemone" ? DEFAULT_SYSTEMONE_TICK_MS : DEFAULT_LIVE_TICK_MS;
+}
+
 export interface LiveStatus {
   running: boolean;
   finished: boolean;
   tickMs: number;
+  effectiveTickMs: number;
+  lastTickMs: number;
   mode: "live" | "replay";
   replayFile?: string;
   config: Pick<
     SimConfig,
-    "provider" | "endpoint" | "model" | "seed" | "days" | "sample" | "minConf" | "batch"
+    | "provider"
+    | "endpoint"
+    | "model"
+    | "seed"
+    | "days"
+    | "sample"
+    | "minConf"
+    | "batch"
+    | "maxBatch"
   >;
   warnings: string[];
 }
@@ -51,6 +72,10 @@ export class LiveSimManager {
   private running = false;
   private stepping = false;
   private tickMs: number;
+  private effectiveTickMs: number;
+  private lastTickDurationMs = 0;
+  private emaTickDurationMs = 0;
+  private customTickMs: boolean;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private mode: "live" | "replay" = "live";
   private replayFile?: string;
@@ -62,7 +87,9 @@ export class LiveSimManager {
 
   constructor(initialConfig: SimConfig, options: { tickMs?: number; runsDir?: string } = {}) {
     this.config = { ...initialConfig };
-    this.tickMs = options.tickMs ?? 850;
+    this.customTickMs = options.tickMs !== undefined;
+    this.tickMs = options.tickMs ?? defaultTickMsForProvider(this.config.provider);
+    this.effectiveTickMs = this.tickMs;
     this.runsDir = options.runsDir
       ? resolveFromInvocationCwd(options.runsDir)
       : join(getInvocationCwd(), "runs");
@@ -138,6 +165,8 @@ export class LiveSimManager {
       running: this.running,
       finished: this.sim.isFinished,
       tickMs: this.tickMs,
+      effectiveTickMs: this.effectiveTickMs,
+      lastTickMs: this.lastTickDurationMs,
       mode: this.mode,
       replayFile: this.replayFile,
       config: {
@@ -149,6 +178,7 @@ export class LiveSimManager {
         sample: this.config.sample,
         minConf: this.config.minConf,
         batch: this.config.batch,
+        maxBatch: this.config.maxBatch,
       },
       warnings: [...this.warnings],
     };
@@ -212,15 +242,23 @@ export class LiveSimManager {
   }
 
   setSpeed(tickMs: number): void {
-    this.tickMs = Math.max(120, Math.min(4000, Math.round(tickMs)));
+    this.customTickMs = true;
+    this.tickMs = Math.max(MIN_LIVE_TICK_MS, Math.min(MAX_LIVE_TICK_MS, Math.round(tickMs)));
+    this.effectiveTickMs =
+      this.config.provider === "systemone" && this.emaTickDurationMs > this.tickMs
+        ? Math.min(MAX_LIVE_TICK_MS, Math.round(this.emaTickDurationMs * 1.15))
+        : this.tickMs;
     this.broadcast({ type: "status", status: this.getStatus() });
   }
 
   async stepOnce(): Promise<TickSnapshot | null> {
     if (this.stepping || this.sim.isFinished) return null;
     this.stepping = true;
+    const start = performance.now();
     try {
       const snap = await this.sim.stepTick();
+      const elapsed = Math.round(performance.now() - start);
+      this.recordTickTiming(elapsed);
       this.latestSnapshot = snap;
       if (this.sim.isFinished) {
         this.running = false;
@@ -233,17 +271,32 @@ export class LiveSimManager {
     }
   }
 
+  private recordTickTiming(elapsedMs: number): void {
+    this.lastTickDurationMs = elapsedMs;
+    this.emaTickDurationMs =
+      this.emaTickDurationMs === 0 ? elapsedMs : this.emaTickDurationMs * 0.65 + elapsedMs * 0.35;
+
+    if (this.config.provider === "systemone") {
+      // Adaptively stretch live cadence when model inference exceeds target tickMs
+      // so SSE ticks stay smooth and never pile up or starve HTTP control requests.
+      const adaptiveTarget = Math.round(this.emaTickDurationMs * 1.15);
+      this.effectiveTickMs = Math.min(MAX_LIVE_TICK_MS, Math.max(this.tickMs, adaptiveTarget));
+    } else {
+      this.effectiveTickMs = this.tickMs;
+    }
+  }
+
   private scheduleNextTick(delayMs: number): void {
     if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(async () => {
       this.timer = null;
       if (!this.running) return;
-      const start = performance.now();
       await this.stepOnce();
       if (this.running && !this.sim.isFinished) {
-        const elapsed = performance.now() - start;
-        this.scheduleNextTick(Math.max(40, this.tickMs - elapsed));
+        const minGap = this.config.provider === "systemone" ? SYSTEMONE_BREATHING_GAP_MS : 40;
+        const nextDelay = Math.max(minGap, this.effectiveTickMs - this.lastTickDurationMs);
+        this.scheduleNextTick(nextDelay);
       }
     }, delayMs);
   }
@@ -255,6 +308,8 @@ export class LiveSimManager {
     this.recentEvents = [];
     this.mode = "live";
     this.replayFile = undefined;
+    this.lastTickDurationMs = 0;
+    this.emaTickDurationMs = 0;
 
     this.config = {
       ...this.config,
@@ -263,6 +318,10 @@ export class LiveSimManager {
         overrides.provider ??
         (this.config.provider === "replay" ? "scripted" : this.config.provider),
     };
+    if (!this.customTickMs) {
+      this.tickMs = defaultTickMsForProvider(this.config.provider);
+    }
+    this.effectiveTickMs = this.tickMs;
     this.sim = this.createSimulation(this.config);
     this.latestSnapshot = this.makeInitialSnapshot();
 
@@ -293,6 +352,8 @@ export class LiveSimManager {
     this.recentEvents = [];
     this.mode = "replay";
     this.replayFile = safeName;
+    this.lastTickDurationMs = 0;
+    this.emaTickDurationMs = 0;
 
     this.config = {
       ...this.config,
@@ -300,10 +361,15 @@ export class LiveSimManager {
       days: parsed.header.days,
       sample: parsed.header.sample,
       minConf: parsed.header.minConf,
+      maxBatch: parsed.header.maxBatch ?? DEFAULT_CONFIG.maxBatch,
       ticksPerDay: parsed.header.ticksPerDay,
       minutesPerTick: parsed.header.minutesPerTick,
       provider: "replay",
     };
+    if (!this.customTickMs) {
+      this.tickMs = defaultTickMsForProvider("replay");
+    }
+    this.effectiveTickMs = this.tickMs;
 
     const provider = new ReplayProvider(parsed.decisions);
     this.sim = this.createSimulation(this.config, provider);

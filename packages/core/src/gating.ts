@@ -116,7 +116,7 @@ export const GATING_RULES: readonly GatingRule[] = [
   },
   {
     action: "buy_food",
-    describe: (_entity) => "get food and eat",
+    describe: (_entity) => "eat",
     isAllowed: (world, entity) => {
       if (entity.needs.hunger <= 0.4) return false;
       return hasAffordableFoodSource(world, entity);
@@ -124,18 +124,18 @@ export const GATING_RULES: readonly GatingRule[] = [
   },
   {
     action: "rest",
-    describe: (_entity) => "rest and recover energy",
+    describe: (_entity) => "rest",
     isAllowed: (_world, entity) => entity.needs.energy < 0.45,
   },
   {
     action: "socialize",
-    describe: (_entity) => "talk with neighbors",
+    describe: (_entity) => "talk",
     isAllowed: (world, entity) =>
       entity.needs.social < 0.75 && findSocialPartner(world, entity) !== null,
   },
   {
     action: "patrol",
-    describe: (_entity) => "patrol the village roads",
+    describe: (_entity) => "patrol",
     isAllowed: (_world, entity) => entity.role === "guard",
   },
 ];
@@ -159,7 +159,7 @@ export function getGatedActions(world: WorldState, entity: Entity): Record<strin
   }
 
   if (entity.role === "child" || Object.keys(criteria).length === 0) {
-    criteria.wander = "wander the village";
+    criteria.wander = "wander";
   }
 
   return criteria;

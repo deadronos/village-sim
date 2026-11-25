@@ -97,6 +97,65 @@ function emptyTelemetry(): DayTelemetry {
   };
 }
 
+const ROLE_LOD_COOLDOWN: Record<Entity["role"], number> = {
+  baker: 0,
+  innkeeper: 0,
+  farmer: 0,
+  woodcutter: 2,
+  smith: 2,
+  herbalist: 2,
+  guard: 3,
+  child: 3,
+};
+
+/**
+ * Deterministic Level-of-Detail (LoD) post-action cooldown (§7.1):
+ * Critical supply-chain roles (baker, innkeeper, farmer) stay immediately
+ * responsive (0 cooldown); secondary craft roles decide every 2nd tick (2);
+ * non-critical ambient roles (guard, child) decide every 3rd tick (3).
+ * Failed food/restock attempts get 0 cooldown to recover immediately.
+ */
+export function getPostActionCooldown(
+  entity: Entity,
+  action: ActionKind,
+  succeeded: boolean,
+): number {
+  if (!succeeded && (action === "buy_food" || action === "restock")) {
+    return 0;
+  }
+  return ROLE_LOD_COOLDOWN[entity.role];
+}
+
+/**
+ * Selects up to `maxBatch` idle, off-cooldown entities for this tick's batched
+ * decision call, prioritizing urgent hunger first and rotating fairly across
+ * ticks via deterministic round-robin so no villager is starved.
+ */
+export function selectEntitiesForTickDecision(world: WorldState, maxBatch: number): Entity[] {
+  const eligible = world.entities.filter((e) => e.goal === null && e.decisionCooldown <= 0);
+  if (eligible.length <= maxBatch) {
+    return eligible;
+  }
+
+  const indexById = new Map<string, number>();
+  for (let i = 0; i < world.entities.length; i++) {
+    indexById.set(world.entities[i]!.id, i);
+  }
+  const n = Math.max(1, world.entities.length);
+
+  return eligible
+    .toSorted((a, b) => {
+      const urgentA = a.needs.hunger > 0.72 ? 0 : 1;
+      const urgentB = b.needs.hunger > 0.72 ? 0 : 1;
+      if (urgentA !== urgentB) return urgentA - urgentB;
+
+      const rotA = ((indexById.get(a.id) ?? 0) + world.tick) % n;
+      const rotB = ((indexById.get(b.id) ?? 0) + world.tick) % n;
+      return rotA - rotB;
+    })
+    .slice(0, maxBatch);
+}
+
 export class VillageSimulation {
   readonly config: SimConfig;
   readonly world: WorldState;
@@ -130,6 +189,7 @@ export class VillageSimulation {
       model: config.model,
       sample: config.sample,
       minConf: config.minConf,
+      maxBatch: config.maxBatch,
       days: config.days,
       ticksPerDay: config.ticksPerDay,
       minutesPerTick: config.minutesPerTick,
@@ -409,10 +469,12 @@ export class VillageSimulation {
   private executeGoalAction(entity: Entity, goal: EntityGoal, tickEvents: SimEvent[]): void {
     const world = this.world;
     const time = formatSimTime(world.tick, world.minutesPerTick, world.startHour);
+    let actionSucceeded = true;
 
     switch (goal.kind) {
       case "work": {
         const res = executeRecipe(world, entity);
+        actionSucceeded = res.ok;
         if (res.ok && res.event) {
           this.emitEvent(res.event, tickEvents);
           const recipe = RECIPES[entity.role];
@@ -440,6 +502,7 @@ export class VillageSimulation {
           entity.goal = null;
           break;
         }
+        actionSucceeded = false;
         if (goal.targetEntity && goal.targetItem) {
           const seller = getEntityById(world, goal.targetEntity);
           if (seller) {
@@ -454,6 +517,7 @@ export class VillageSimulation {
             );
             const trade = executeTrade(world, entity, seller, goal.targetItem, buyQty);
             if (trade.ok && trade.event) {
+              actionSucceeded = true;
               this.emitEvent(trade.event, tickEvents);
               maybeRecordFriendshipRumor(world, entity, seller, prevAff);
               const gossipEv = propagateGossip(world, seller, entity);
@@ -522,6 +586,7 @@ export class VillageSimulation {
           if (meal) this.emitEvent(meal, tickEvents);
           world.deadlockCounter[entity.id] = 0;
         } else {
+          actionSucceeded = false;
           pushMemory(entity, "found no food to buy");
           recordRumor(entity, {
             id: `shortage:${world.day}:food:${entity.location}`,
@@ -655,6 +720,8 @@ export class VillageSimulation {
         break;
       }
     }
+
+    entity.decisionCooldown = getPostActionCooldown(entity, goal.kind, actionSucceeded);
   }
 
   private advanceActiveGoal(entity: Entity, tickEvents: SimEvent[]): void {
@@ -728,10 +795,16 @@ export class VillageSimulation {
       this.emitEvent(ev, tickEvents);
     }
 
-    // 3. Need decay
+    // 3. Need decay & LoD cooldown advancement
     for (const entity of world.entities) {
       decayNeeds(entity);
-      // Interrupt non-eating goals if critically hungry
+      if (entity.decisionCooldown > 0) {
+        entity.decisionCooldown -= 1;
+      }
+      // Urgent hunger bypasses LoD cooldown and interrupts non-eating goals
+      if (entity.needs.hunger > 0.72) {
+        entity.decisionCooldown = 0;
+      }
       if (entity.needs.hunger > 0.8 && entity.goal && entity.goal.kind !== "buy_food") {
         entity.goal = null;
       }
@@ -744,8 +817,8 @@ export class VillageSimulation {
       }
     }
 
-    // 5. Batched tick decisions for all idle entities
-    const idleEntities = world.entities.filter((e) => e.goal === null);
+    // 5. Batched tick decisions for eligible idle entities (bounded by LoD cadence + maxBatch)
+    const idleEntities = selectEntitiesForTickDecision(world, this.config.maxBatch);
     if (idleEntities.length > 0) {
       const stateSummary = serializeWorldState(world);
       const questions: Record<string, Question> = {};

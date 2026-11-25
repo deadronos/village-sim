@@ -6,6 +6,7 @@ export const DEFAULT_CONFIG: SimConfig = {
   model: "kev-latest",
   timeoutMs: 120_000,
   batch: "auto",
+  maxBatch: 3,
   sample: "weighted",
   minConf: 0.34,
   seed: 7,
@@ -22,6 +23,7 @@ export interface PartialSimConfig {
   model?: string;
   timeoutMs?: number;
   batch?: BatchMode;
+  maxBatch?: number;
   sample?: SampleMode;
   minConf?: number;
   apiKey?: string;
@@ -73,6 +75,8 @@ export function configFromEnv(env: Record<string, string | undefined>): PartialS
     }
     out.batch = b;
   }
+  const maxBatch = parseNumber(env.DECISION_MAX_BATCH, "DECISION_MAX_BATCH");
+  if (maxBatch !== undefined) out.maxBatch = Math.floor(maxBatch);
   if (env.DECISION_SAMPLE) {
     const s = env.DECISION_SAMPLE.trim() as SampleMode;
     if (!VALID_SAMPLE.has(s)) {
@@ -130,6 +134,9 @@ export function resolveConfig(layers: {
   }
   if (merged.days < 1) {
     throw new Error(`days must be >= 1, got ${merged.days}`);
+  }
+  if (!Number.isInteger(merged.maxBatch) || merged.maxBatch < 1) {
+    throw new Error(`maxBatch must be an integer >= 1, got ${merged.maxBatch}`);
   }
 
   return merged;

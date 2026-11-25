@@ -196,6 +196,7 @@ export function createInitialWorld(
       },
       focus: "duty",
       goal: null,
+      decisionCooldown: 0,
       memory: [],
       rumors: [],
       affinity,
@@ -247,6 +248,7 @@ export function resetEntitiesForNewDay(world: WorldState, nextDay: number): void
     entity.prevLocation = entity.location;
     entity.location = entity.home;
     entity.goal = null;
+    entity.decisionCooldown = 0;
     entity.needs.energy = clamp01(Math.max(entity.needs.energy + 0.55, 0.82));
     entity.needs.hunger = clamp01(Math.max(entity.needs.hunger * 0.6, 0.24));
     entity.needs.social = clamp01(Math.max(entity.needs.social, 0.5));

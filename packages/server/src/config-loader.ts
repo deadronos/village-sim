@@ -109,6 +109,9 @@ export function configFromFlags(flags: Record<string, string | boolean>): Partia
   const batch = stringFlag(flags, "batch");
   if (batch) out.batch = batch as BatchMode;
 
+  const maxBatch = numberFlag(flags, "max-batch");
+  if (maxBatch !== undefined) out.maxBatch = Math.floor(maxBatch);
+
   const sample = stringFlag(flags, "sample");
   if (sample) out.sample = sample as SampleMode;
 
