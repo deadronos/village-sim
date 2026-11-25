@@ -223,7 +223,7 @@ export class VillageSimulation {
 
     const header: HeaderLogRecord = {
       recordType: "header",
-      version: provider instanceof ReplayProvider ? provider.runVersion : 2,
+      version: provider instanceof ReplayProvider ? provider.runVersion : 3,
       eventsRecorded: true,
       seed: config.seed,
       provider: config.provider,
@@ -445,7 +445,9 @@ export class VillageSimulation {
       }
 
       case "restock": {
-        const opt = findRestockOption(world, entity);
+        const legacyRestock =
+          this.provider instanceof ReplayProvider && this.provider.runVersion <= 2;
+        const opt = findRestockOption(world, entity, legacyRestock);
         if (!opt) {
           pushMemory(entity, "nothing to restock with");
           return makeGoal("wander", "well");
@@ -852,6 +854,7 @@ export class VillageSimulation {
     const tickEvents: SimEvent[] = [];
     const legacyHungerOverride =
       this.provider instanceof ReplayProvider && this.provider.runVersion === 1;
+    const legacyRestock = this.provider instanceof ReplayProvider && this.provider.runVersion <= 2;
     const tickDecisions: DecisionLogRecord[] = [];
     const time = formatSimTime(world.tick, world.minutesPerTick, world.startHour);
 
@@ -911,7 +914,7 @@ export class VillageSimulation {
       const criteriaByEntity = new Map<string, Record<string, string>>();
 
       for (const entity of idleEntities) {
-        const criteria = getGatedActions(world, entity, legacyHungerOverride);
+        const criteria = getGatedActions(world, entity, legacyHungerOverride, legacyRestock);
         criteriaByEntity.set(entity.id, criteria);
         questions[`act_${entity.id}`] = buildTickQuestion(
           world,

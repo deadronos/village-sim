@@ -1,12 +1,14 @@
 export type QuestionType = "choice" | "noul" | "score";
 
-// Keep the legacy scripted scoring input off the JSON wire and out of the model prompt.
+// Legacy symbol alias retained for backwards compatibility; prefer `scriptedInstructions`.
 export const SCRIPTED_INSTRUCTIONS = Symbol("scriptedInstructions");
 
 export interface ChoiceQuestion {
   type: "choice";
   instructions: string;
   criteria: Record<string, string>;
+  /** Legacy scripted scoring input; preserved across clones and stripped on the HTTP wire. */
+  scriptedInstructions?: string;
   [SCRIPTED_INSTRUCTIONS]?: string;
 }
 
@@ -257,7 +259,7 @@ export interface DecisionLogRecord {
 
 export interface HeaderLogRecord {
   recordType: "header";
-  version: 1 | 2;
+  version: 1 | 2 | 3;
   eventsRecorded?: true;
   seed: number;
   provider: ProviderKind;

@@ -205,4 +205,29 @@ describe("Gating rules (A6)", () => {
     dorn.needs.social = 0.95;
     expect(Object.keys(getGatedActions(world, dorn))).toEqual(["wander"]);
   });
+
+  it("gates innkeeper restocking on stew stock and preserves a gold reserve when holding stew", () => {
+    const world = createInitialWorld(DEFAULT_CONFIG);
+    const bram = getEntityById(world, "bram")!;
+    const anna = getEntityById(world, "anna")!;
+    setStock(anna, "bread", 4);
+
+    // At 3+ stew, restock is withheld so the innkeeper does not over-buy inputs
+    bram.gold = 20;
+    setStock(bram, "stew", 3);
+    setStock(bram, "bread", 0);
+    setStock(bram, "water", 2);
+    expect(getGatedActions(world, bram).restock).toBeUndefined();
+
+    // Below 3 stew, holding 1 stew and only 4g (bread price): paid restock would drop gold to 0g, so it is withheld
+    bram.gold = ITEM_PRICES.bread;
+    setStock(bram, "stew", 1);
+    setStock(bram, "bread", 0);
+    setStock(bram, "water", 2);
+    expect(getGatedActions(world, bram).restock).toBeUndefined();
+
+    // With enough gold to keep a bread reserve (>= 8g), restock is allowed again
+    bram.gold = ITEM_PRICES.bread * 2;
+    expect(getGatedActions(world, bram).restock).toBeDefined();
+  });
 });

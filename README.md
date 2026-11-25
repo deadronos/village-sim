@@ -72,7 +72,7 @@ DECISION_TIMEOUT_MS=120000
 DECISION_BATCH=auto               # auto | always | never
 DECISION_MAX_BATCH=3              # max entities decided per tick sweep (LoD + pacing)
 DECISION_SAMPLE=weighted          # weighted | argmax
-DECISION_ESCALATE_ON=sampled       # sampled | margin | entropy
+DECISION_ESCALATE_ON=margin        # margin | entropy | sampled
 DECISION_MIN_CONF=0.34
 DECISION_RUMOR_MAX_AGE_DAYS=2       # 0 limits prompt rumors to the current day
 DECISION_API_KEY=                 # optional bearer token
@@ -85,7 +85,7 @@ PORT=4173                         # live simulation backend HTTP port (and Vite 
 - **Bounded tick batches**: Each tick sweep queries at most `DECISION_MAX_BATCH` entities (default `3`), prioritizing urgent hunger and supply-chain roles with deterministic round-robin fairness so batched local 4B inference stays under the 2s p95 budget.
 - **Adaptive live server pacing**: `village serve` defaults to `850ms` ticks for `scripted`/`replay` and `2000ms` for `systemone` (unless `--tick-ms` is explicitly set). When a `systemone` tick exceeds the target interval, `LiveSimManager` stretches `effectiveTickMs` and enforces a breathing gap between ticks so the SSE stream never stalls or piles up.
 - **System One recovery**: After three consecutive decision sweeps without usable answers, the simulation runs scripted decisions for five seconds before trying System One again. The HUD shows when scripted fallback is active and clears the indicator when System One returns a usable answer.
-- **Confidence escalation**: `DECISION_MIN_CONF` applies to the sampled probability, the gap between the top two probabilities, or one minus normalized entropy, depending on `DECISION_ESCALATE_ON`. The HUD and daily summary show the count and share of decisions escalated to the scripted policy.
+- **Confidence escalation**: `DECISION_MIN_CONF` defaults to `DECISION_ESCALATE_ON=margin` (top-1 minus top-2 probability), which is draw-independent so weighted sampling of a low-probability branch on a confident distribution does not trigger escalation. `entropy` (one minus normalized entropy) and `sampled` (back-compat; equivalent to max probability under `sample=argmax`) remain supported. The HUD and daily summary show the count and share of decisions escalated to the scripted policy.
 - **Rumors in model prompts**: Dawn and tick prompts include at most one unverified rumor, labeled with its origin day and hop count. The serializer omits rumors older than `DECISION_RUMOR_MAX_AGE_DAYS` and claims contradicted by current stock. Regular gossip expiration still applies. Decision logs show the model-facing prompt. The offline scripted policy keeps its existing scoring inputs for replay compatibility.
 
 ## Verification Commands

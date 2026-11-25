@@ -18,7 +18,7 @@ export class ReplayProvider implements DecisionProvider {
   private currentDay = 1;
   private currentTick = 0;
 
-  constructor(records: readonly DecisionLogRecord[], runVersion: HeaderLogRecord["version"] = 2) {
+  constructor(records: readonly DecisionLogRecord[], runVersion: HeaderLogRecord["version"] = 3) {
     this.runVersion = runVersion;
     for (const rec of records) {
       this.recordsByKey.set(this.keyFor(rec.day, rec.tick, rec.question_id), rec);

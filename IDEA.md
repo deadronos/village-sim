@@ -134,7 +134,7 @@ DECISION_MODEL      = kev-latest
 DECISION_TIMEOUT_MS = 120000
 DECISION_BATCH      = auto | always | never              (default: auto)
 DECISION_SAMPLE     = weighted | argmax                 (default: weighted)
-DECISION_ESCALATE_ON = sampled | margin | entropy       (default: sampled)
+DECISION_ESCALATE_ON = margin | entropy | sampled       (default: margin)
 DECISION_MIN_CONF   = 0.34       # below this, escalate (see §7.3)
 DECISION_API_KEY    = (optional) bearer token, sent only if set
 ```
@@ -283,10 +283,10 @@ meal available can receive emergency relief without attempting a new purchase.
 
 The escalation metric applies to valid model decisions at dawn and during ticks.
 
-- `sampled` (default) uses the probability of the sampled action.
-- `margin` uses the difference between the two highest probabilities.
+- `margin` (default) uses the difference between the two highest probabilities. It is draw-independent, so weighted sampling of a tail branch on a confident distribution does not trigger unnecessary escalation.
 - `entropy` uses one minus the Shannon entropy normalized over all gated options.
   A single available option has confidence 1.
+- `sampled` (back-compat) uses the probability of the sampled action. Under `sample=argmax` this equals max probability, whereas under `sample=weighted` it can escalate confident distributions when a low-probability branch is drawn.
 
 If the metric is below `DECISION_MIN_CONF`, use the scripted policy for that
 decision and log `escalated: true`. The decision log's `confidence` field

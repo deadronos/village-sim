@@ -32,6 +32,25 @@ interface WireResponse {
   latency_ms?: number;
 }
 
+function toWireQuestion(question: Question): Question {
+  if (question.type === "choice") {
+    return {
+      type: "choice",
+      instructions: question.instructions,
+      criteria: question.criteria,
+    };
+  }
+  return question;
+}
+
+function toWireQuestions(questions: Record<string, Question>): Record<string, Question> {
+  const out: Record<string, Question> = {};
+  for (const [id, q] of Object.entries(questions)) {
+    out[id] = toWireQuestion(q);
+  }
+  return out;
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -193,7 +212,7 @@ export class SystemOneProvider implements DecisionProvider {
       body: JSON.stringify({
         model: this.model,
         state,
-        questions,
+        questions: toWireQuestions(questions),
       }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });

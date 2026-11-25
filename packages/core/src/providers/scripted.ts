@@ -208,7 +208,8 @@ export class ScriptedProvider implements DecisionProvider {
       if (question.type === "choice") {
         const keys = Object.keys(question.criteria).toSorted();
         const isDawn = qId.startsWith("dawn_");
-        const instructions = question[SCRIPTED_INSTRUCTIONS] ?? question.instructions;
+        const instructions =
+          question.scriptedInstructions ?? question[SCRIPTED_INSTRUCTIONS] ?? question.instructions;
         const probabilities = isDawn
           ? scoreDawnFocus(instructions, stateSummary, keys)
           : scoreTickAction(instructions, stateSummary, keys);

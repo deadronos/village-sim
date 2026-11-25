@@ -227,10 +227,30 @@ describe("Economy, recipes, caps, and invariants", () => {
         expect(
           stockedAtZeroGold.length,
           `${context}: villagers at 0g with stock to sell: ${stockedAtZeroGold.join(", ")}`,
-        ).toBeLessThanOrEqual(1);
+        ).toBe(0);
+
+        const producerMinGold = Math.min(
+          ...day.entities.filter((entity) => RECIPES[entity.role]).map((entity) => entity.gold),
+        );
+        expect(
+          producerMinGold,
+          `${context}: day-end producer min gold floor`,
+        ).toBeGreaterThanOrEqual(2);
       }
     },
   );
+
+  it("keeps the innkeeper solvent on the default seed day-2 demo run (#36)", async () => {
+    const sim = new VillageSimulation(
+      { ...DEFAULT_CONFIG, seed: 7, days: 3, provider: "scripted" },
+      new ScriptedProvider(),
+    );
+    const result = await sim.runAllDays();
+    for (const day of result.summaries) {
+      const bram = day.entities.find((e) => e.id === "bram")!;
+      expect(bram.gold, `seed 7 day ${day.day}: bram gold`).toBeGreaterThanOrEqual(2);
+    }
+  });
 
   it("maintains healthy trade volume, wealth spread, and avoids consecutive 0g days with unsold stock", async () => {
     const seeds = [7, 19, 42, 101];
