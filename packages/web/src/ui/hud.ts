@@ -1,4 +1,11 @@
-import type { Entity, ItemKind, PartialSimConfig, SimEvent, TickSnapshot } from "@village/core";
+import {
+  getRelationshipTier,
+  type Entity,
+  type ItemKind,
+  type PartialSimConfig,
+  type SimEvent,
+  type TickSnapshot,
+} from "@village/core";
 import type { ClientStatus } from "../api.ts";
 import { ROLE_COLORS } from "../scene/villagers.ts";
 
@@ -7,6 +14,7 @@ export interface HudCallbacks {
   onStep(): void;
   onSpeedChange(tickMs: number): void;
   onToggleBubbles(enabled: boolean): void;
+  onToggleGraph(enabled: boolean): void;
   onSelectEntity(entityId: string): void;
   onFocusEntity(entityId: string): void;
   onReset(config: PartialSimConfig): void;
@@ -32,12 +40,15 @@ export class VillageHud {
   private readonly clockDay = el<HTMLSpanElement>("clock-day");
   private readonly clockTime = el<HTMLSpanElement>("clock-time");
   private readonly weatherPill = el<HTMLSpanElement>("weather-pill");
+  private readonly prosperityPill = el<HTMLSpanElement>("prosperity-pill");
   private readonly btnPlay = el<HTMLButtonElement>("btn-play");
   private readonly btnStep = el<HTMLButtonElement>("btn-step");
   private readonly speedSlider = el<HTMLInputElement>("speed-slider");
   private readonly btnBubbles = el<HTMLButtonElement>("btn-bubbles");
+  private readonly btnGraph = el<HTMLButtonElement>("btn-graph");
   private readonly btnSettings = el<HTMLButtonElement>("btn-settings");
   private bubblesEnabled = true;
+  private graphEnabled = false;
 
   private readonly rosterList = el<HTMLDivElement>("roster-list");
   private readonly sidePanel = el<HTMLElement>("side-panel");
@@ -68,6 +79,8 @@ export class VillageHud {
   private readonly inspInventory = el<HTMLDivElement>("insp-inventory");
   private readonly inspProvider = el<HTMLSpanElement>("insp-provider");
   private readonly inspProbs = el<HTMLDivElement>("insp-probs");
+  private readonly inspBonds = el<HTMLDivElement>("insp-bonds");
+  private readonly inspRumors = el<HTMLUListElement>("insp-rumors");
   private readonly inspMemory = el<HTMLUListElement>("insp-memory");
   private readonly inspPrompt = el<HTMLPreElement>("insp-prompt");
 
@@ -93,6 +106,19 @@ export class VillageHud {
   constructor(callbacks: HudCallbacks) {
     this.callbacks = callbacks;
     this.bindEvents();
+    this.observeTopbarHeight();
+  }
+
+  private observeTopbarHeight(): void {
+    const topbar = document.querySelector<HTMLElement>(".hud-topbar");
+    if (!topbar || typeof ResizeObserver === "undefined") return;
+    const syncOffset = () => {
+      const topPx = Math.ceil(topbar.getBoundingClientRect().bottom + 12);
+      document.documentElement.style.setProperty("--hud-top", `${topPx}px`);
+    };
+    const ro = new ResizeObserver(syncOffset);
+    ro.observe(topbar);
+    syncOffset();
   }
 
   private bindEvents(): void {
@@ -108,6 +134,13 @@ export class VillageHud {
       this.btnBubbles.classList.toggle("active", this.bubblesEnabled);
       this.btnBubbles.setAttribute("aria-pressed", String(this.bubblesEnabled));
       this.callbacks.onToggleBubbles(this.bubblesEnabled);
+    });
+
+    this.btnGraph.addEventListener("click", () => {
+      this.graphEnabled = !this.graphEnabled;
+      this.btnGraph.classList.toggle("active", this.graphEnabled);
+      this.btnGraph.setAttribute("aria-pressed", String(this.graphEnabled));
+      this.callbacks.onToggleGraph(this.graphEnabled);
     });
 
     this.tabTimeline.addEventListener("click", () => this.setActiveTab("timeline"));
@@ -235,6 +268,9 @@ export class VillageHud {
     this.clockDay.textContent = `Day ${snapshot.day}`;
     this.clockTime.textContent = snapshot.time;
     this.weatherPill.textContent = snapshot.weather;
+    this.prosperityPill.textContent = snapshot.prosperity;
+    this.prosperityPill.className = `pill pill-${snapshot.prosperity}`;
+    this.prosperityPill.title = `Village prosperity: ${snapshot.prosperity} (${Math.round(snapshot.prosperityScore * 100)}%)`;
 
     this.statTrades.textContent = `${snapshot.stats.tradesToday} (${snapshot.stats.tradesTotal})`;
     this.statBread.textContent = String(snapshot.stats.breadProducedToday);
@@ -340,6 +376,8 @@ export class VillageHud {
 
     this.renderInventory(entity);
     this.renderDecision(entity);
+    this.renderBonds(entity);
+    this.renderRumors(entity);
     this.renderMemory(entity);
   }
 
@@ -403,6 +441,76 @@ export class VillageHud {
     }
 
     this.inspPrompt.textContent = `STATE:\n${dec.worldStateSummary}\n\nINSTRUCTIONS:\n${dec.instructions}`;
+  }
+
+  private renderBonds(entity: Entity): void {
+    this.inspBonds.replaceChildren();
+    const others = (this.latestSnapshot?.entities ?? []).filter((e) => e.id !== entity.id);
+    const ranked = others
+      .map((other) => {
+        const aff = entity.affinity[other.id] ?? 0.5;
+        return { other, aff, tier: getRelationshipTier(aff) };
+      })
+      .toSorted((a, b) => b.aff - a.aff)
+      .slice(0, 4);
+
+    for (const { other, aff, tier } of ranked) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `bond-row tier-${tier}`;
+      btn.addEventListener("click", () => {
+        this.callbacks.onSelectEntity(other.id);
+        this.callbacks.onFocusEntity(other.id);
+      });
+
+      const name = document.createElement("span");
+      name.textContent = other.name;
+
+      const track = document.createElement("div");
+      track.className = "bond-bar-track";
+      const fill = document.createElement("div");
+      fill.className = "bond-bar-fill";
+      fill.style.width = `${Math.round(aff * 100)}%`;
+      track.append(fill);
+
+      const badge = document.createElement("span");
+      badge.className = "bond-tier";
+      badge.textContent = `${tier} ${Math.round(aff * 100)}%`;
+
+      btn.append(name, track, badge);
+      this.inspBonds.append(btn);
+    }
+  }
+
+  private renderRumors(entity: Entity): void {
+    this.inspRumors.replaceChildren();
+    if (entity.rumors.length === 0) {
+      const li = document.createElement("li");
+      li.className = "muted";
+      li.textContent = "No active rumors heard yet.";
+      this.inspRumors.append(li);
+      return;
+    }
+
+    const sorted = entity.rumors.toSorted((a, b) => {
+      if (b.originDay !== a.originDay) return b.originDay - a.originDay;
+      return b.originTick - a.originTick;
+    });
+
+    for (const r of sorted) {
+      const li = document.createElement("li");
+      li.className = "rumor-item";
+      li.textContent = `"${r.summary}"`;
+
+      const meta = document.createElement("span");
+      meta.className = "rumor-meta";
+      meta.textContent =
+        r.hops === 0
+          ? `firsthand · Day ${r.originDay}`
+          : `from ${r.sourceId} · ${r.hops} ${r.hops === 1 ? "hop" : "hops"} · Day ${r.originDay}`;
+      li.append(meta);
+      this.inspRumors.append(li);
+    }
   }
 
   private renderMemory(entity: Entity): void {

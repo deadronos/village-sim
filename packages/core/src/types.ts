@@ -98,6 +98,23 @@ export type ActionKind =
 
 export type Weather = "clear" | "overcast" | "rain" | "breezy";
 
+export type ProsperityTier = "lean" | "steady" | "thriving";
+
+export type RelationshipTier = "cool" | "neutral" | "warm" | "close";
+
+export type RumorKind = "shortage" | "surplus" | "friendship" | "prosperity" | "gift";
+
+export interface Rumor {
+  id: string;
+  kind: RumorKind;
+  subjectId: string;
+  summary: string;
+  originDay: number;
+  originTick: number;
+  hops: number;
+  sourceId: string;
+}
+
 export interface Needs {
   hunger: number;
   energy: number;
@@ -144,6 +161,7 @@ export interface Entity {
   focus: Focus;
   goal: EntityGoal | null;
   memory: string[];
+  rumors: Rumor[];
   affinity: Record<string, number>;
   mealsToday: number;
   tradesToday: number;
@@ -175,6 +193,8 @@ export interface SimEvent {
     | "eat"
     | "move"
     | "socialize"
+    | "gossip"
+    | "gift"
     | "rest"
     | "patrol"
     | "wander"
@@ -190,6 +210,7 @@ export interface SimEvent {
   item?: ItemKind;
   qty?: number;
   gold?: number;
+  rumorSummary?: string;
   message: string;
 }
 
@@ -272,6 +293,8 @@ export interface WorldState {
   ticksPerDay: number;
   startHour: number;
   weather: Weather;
+  prosperity: ProsperityTier;
+  prosperityScore: number;
   entities: Entity[];
   initialTotalGold: number;
   totalGoldMinted: number;
@@ -288,6 +311,8 @@ export interface TickSnapshot {
   tick: number;
   time: string;
   weather: Weather;
+  prosperity: ProsperityTier;
+  prosperityScore: number;
   stateHash: string;
   entities: Entity[];
   events: SimEvent[];

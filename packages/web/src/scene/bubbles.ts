@@ -28,6 +28,8 @@ const ACCENT_BY_KIND: Record<SimEvent["kind"], string> = {
   produce: "#58d3b5",
   eat: "#ff9c5e",
   socialize: "#6fb7ff",
+  gossip: "#a88cff",
+  gift: "#ff8fb3",
   wage: "#c79bff",
   demand: "#c79bff",
   rest: "#93a4ff",
@@ -249,6 +251,57 @@ function buildBubblesForEvent(
           duration: 2.1,
         },
       ];
+    }
+
+    case "gossip": {
+      if (!ev.entityId || !ev.rumorSummary) return [];
+      const specs: BubbleSpec[] = [
+        {
+          entityId: ev.entityId,
+          fallbackPlace: ev.place,
+          text: `🗣️ "${ev.rumorSummary}"`,
+          accent,
+          delay: 0,
+          duration: 2.9,
+        },
+      ];
+      if (ev.otherEntityId) {
+        specs.push({
+          entityId: ev.otherEntityId,
+          fallbackPlace: ev.place,
+          text: '💬 "Good to know!"',
+          accent: "#c4b0ff",
+          delay: 0.35,
+          duration: 2.2,
+        });
+      }
+      return specs;
+    }
+
+    case "gift": {
+      if (!ev.entityId || !ev.item) return [];
+      const other = ev.otherEntityId ? entitiesById.get(ev.otherEntityId) : undefined;
+      const specs: BubbleSpec[] = [
+        {
+          entityId: ev.entityId,
+          fallbackPlace: ev.place,
+          text: `🎁 Shared ${ev.item}${other ? ` with ${other.name}` : ""}`,
+          accent,
+          delay: 0,
+          duration: 2.8,
+        },
+      ];
+      if (ev.otherEntityId) {
+        specs.push({
+          entityId: ev.otherEntityId,
+          fallbackPlace: ev.place,
+          text: '💖 "Thank you!"',
+          accent: "#ffc2d6",
+          delay: 0.28,
+          duration: 2.4,
+        });
+      }
+      return specs;
     }
 
     case "wage": {

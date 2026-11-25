@@ -63,16 +63,25 @@ export function hasAffordableFoodSource(world: WorldState, entity: Entity): bool
 }
 
 export function findSocialPartner(world: WorldState, entity: Entity): Entity | null {
-  // Prefer someone currently at tavern/well/market or not resting at home
+  // Prefer someone not resting at home, weighted by friendship & weather-appropriate hubs
   const candidates = world.entities.filter(
     (other) => other.id !== entity.id && other.goal?.kind !== "rest",
   );
   if (candidates.length === 0) return null;
 
-  const atHub = candidates.find(
-    (c) => c.location === "tavern" || c.location === "well" || c.location === "market",
-  );
-  return atHub ?? candidates[0] ?? null;
+  const preferredHubs =
+    world.weather === "rain"
+      ? new Set(["tavern", "bakery"])
+      : new Set(["tavern", "well", "market"]);
+
+  const ranked = candidates.toSorted((a, b) => {
+    const scoreA = (entity.affinity[a.id] ?? 0.5) + (preferredHubs.has(a.location) ? 0.18 : 0);
+    const scoreB = (entity.affinity[b.id] ?? 0.5) + (preferredHubs.has(b.location) ? 0.18 : 0);
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return a.id < b.id ? -1 : 1;
+  });
+
+  return ranked[0] ?? null;
 }
 
 /**

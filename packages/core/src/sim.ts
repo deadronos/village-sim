@@ -1,4 +1,5 @@
 import {
+  ITEM_CAPS,
   ITEM_PRICES,
   RECIPES,
   applyDeadlockRelief,
@@ -12,6 +13,14 @@ import {
   runScheduledEconomyEvents,
 } from "./economy.ts";
 import { findRestockOption, findSocialPartner, getGatedActions } from "./gating.ts";
+import {
+  decayRumorsForNewDay,
+  maybeRecordFriendshipRumor,
+  propagateGossip,
+  recordRumor,
+  tryCozySurplusExchange,
+  updateWorldProsperity,
+} from "./gossip.ts";
 import { hashWorldState } from "./hash.ts";
 import { percentile } from "./log.ts";
 import { PATROL_ROUTE, findRoute, getEdgeCost } from "./places.ts";
@@ -318,6 +327,7 @@ export class VillageSimulation {
         const preferStew =
           stewSellers.length > 0 &&
           (breadSellers.length === 0 ||
+            world.weather === "rain" ||
             entity.needs.social < 0.55 ||
             world.tick >= 36 ||
             rng.next() < 0.45);
@@ -352,14 +362,18 @@ export class VillageSimulation {
       case "socialize": {
         const partner = findSocialPartner(world, entity);
         const socialSpot =
-          partner &&
-          (partner.location === "tavern" ||
-            partner.location === "well" ||
-            partner.location === "market")
-            ? partner.location
-            : rng.next() < 0.55
-              ? "tavern"
-              : "well";
+          world.weather === "rain"
+            ? "tavern"
+            : partner &&
+                (partner.location === "tavern" ||
+                  partner.location === "well" ||
+                  partner.location === "market")
+              ? partner.location
+              : rng.next() < 0.5
+                ? "tavern"
+                : world.prosperity === "thriving"
+                  ? "market"
+                  : "well";
         return makeGoal("socialize", socialSpot, { targetEntity: partner?.id });
       }
 
@@ -387,6 +401,17 @@ export class VillageSimulation {
         const res = executeRecipe(world, entity);
         if (res.ok && res.event) {
           this.emitEvent(res.event, tickEvents);
+          const recipe = RECIPES[entity.role];
+          if (recipe && getStock(entity, recipe.output) >= ITEM_CAPS[recipe.output] - 1) {
+            recordRumor(entity, {
+              id: `surplus:${world.day}:${entity.id}:${recipe.output}`,
+              kind: "surplus",
+              subjectId: entity.id,
+              summary: `${entity.name.toLowerCase()} has surplus ${recipe.output}`,
+              day: world.day,
+              tick: world.tick,
+            });
+          }
         } else {
           pushMemory(entity, `could not ${entity.duty} (${res.reason ?? "blocked"})`);
         }
@@ -404,11 +429,23 @@ export class VillageSimulation {
         if (goal.targetEntity && goal.targetItem) {
           const seller = getEntityById(world, goal.targetEntity);
           if (seller) {
+            const prevAff = entity.affinity[seller.id] ?? 0.5;
             const trade = executeTrade(world, entity, seller, goal.targetItem, 1);
             if (trade.ok && trade.event) {
               this.emitEvent(trade.event, tickEvents);
+              maybeRecordFriendshipRumor(world, entity, seller, prevAff);
+              const gossipEv = propagateGossip(world, seller, entity);
+              if (gossipEv) this.emitEvent(gossipEv, tickEvents);
             } else {
               pushMemory(entity, `failed to restock ${goal.targetItem}`);
+              recordRumor(entity, {
+                id: `shortage:${world.day}:${entity.id}:${goal.targetItem}`,
+                kind: "shortage",
+                subjectId: entity.id,
+                summary: `${entity.name.toLowerCase()} is short on ${goal.targetItem}`,
+                day: world.day,
+                tick: world.tick,
+              });
             }
           }
         }
@@ -464,6 +501,14 @@ export class VillageSimulation {
           world.deadlockCounter[entity.id] = 0;
         } else {
           pushMemory(entity, "found no food to buy");
+          recordRumor(entity, {
+            id: `shortage:${world.day}:food:${entity.location}`,
+            kind: "shortage",
+            subjectId: entity.id,
+            summary: `${entity.location} ran low on food`,
+            day: world.day,
+            tick: world.tick,
+          });
           const relief = applyDeadlockRelief(world, entity);
           if (relief) this.emitEvent(relief, tickEvents);
         }
@@ -500,9 +545,11 @@ export class VillageSimulation {
 
         entity.needs.social = clamp01(entity.needs.social + 0.32);
         if (partner) {
+          const prevAff = entity.affinity[partner.id] ?? 0.5;
           partner.needs.social = clamp01(partner.needs.social + 0.14);
-          entity.affinity[partner.id] = clamp01((entity.affinity[partner.id] ?? 0.5) + 0.06);
+          entity.affinity[partner.id] = clamp01(prevAff + 0.06);
           partner.affinity[entity.id] = clamp01((partner.affinity[entity.id] ?? 0.5) + 0.06);
+          maybeRecordFriendshipRumor(world, entity, partner, prevAff);
           pushMemory(entity, `chatted with ${partner.name.toLowerCase()} at ${entity.location}`);
           this.emitEvent(
             {
@@ -517,6 +564,18 @@ export class VillageSimulation {
             },
             tickEvents,
           );
+
+          // Exchange gossip bidirectionally (at most 1 rumor each)
+          const gossipA = propagateGossip(world, entity, partner);
+          if (gossipA) this.emitEvent(gossipA, tickEvents);
+          const gossipB = propagateGossip(world, partner, entity);
+          if (gossipB) this.emitEvent(gossipB, tickEvents);
+
+          // Cozy surplus purchase or friend gifting when village is steady/thriving
+          const exchange =
+            tryCozySurplusExchange(world, entity, partner) ??
+            tryCozySurplusExchange(world, partner, entity);
+          if (exchange) this.emitEvent(exchange, tickEvents);
         } else {
           pushMemory(entity, `relaxed at ${entity.location}`);
           this.emitEvent(
@@ -809,7 +868,8 @@ export class VillageSimulation {
       }
     }
 
-    // 6. Assert all deterministic world invariants every tick (§8)
+    // 6. Update deterministic village prosperity & assert invariants every tick (§8)
+    updateWorldProsperity(world);
     assertWorldInvariants(world);
 
     // 7. Compute canonical state hash and finalize decision logs
@@ -880,6 +940,8 @@ export class VillageSimulation {
       tick: currentTick,
       time,
       weather: currentWeather,
+      prosperity: world.prosperity,
+      prosperityScore: world.prosperityScore,
       stateHash,
       entities: cloneEntitiesForSnapshot(world.entities),
       events: tickEvents,
@@ -901,6 +963,8 @@ export class VillageSimulation {
     if (isLastTickOfDay) {
       if (world.day < this.config.days) {
         resetEntitiesForNewDay(world, world.day + 1);
+        decayRumorsForNewDay(world);
+        updateWorldProsperity(world);
       } else {
         world.day += 1;
         world.tick = 0;

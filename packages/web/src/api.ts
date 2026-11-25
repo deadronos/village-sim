@@ -152,6 +152,8 @@ export class VillageApiClient {
       tick: w.tick,
       time: formatSimTime(w.tick, w.minutesPerTick, w.startHour),
       weather: w.weather,
+      prosperity: w.prosperity,
+      prosperityScore: w.prosperityScore,
       stateHash: hashWorldState(w),
       entities: cloneEntitiesForSnapshot(w.entities),
       events: [],

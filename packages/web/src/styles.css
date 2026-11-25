@@ -23,6 +23,7 @@
   --radius: 14px;
   --radius-sm: 9px;
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+  --hud-top: 74px;
 
   accent-color: var(--accent);
 }
@@ -186,6 +187,24 @@ pre {
   text-transform: none;
 }
 
+.pill-thriving {
+  background: rgba(88, 211, 181, 0.18);
+  border-color: rgba(88, 211, 181, 0.5);
+  color: #8df0d8;
+}
+
+.pill-steady {
+  background: rgba(111, 183, 255, 0.16);
+  border-color: rgba(111, 183, 255, 0.45);
+  color: #b7dcff;
+}
+
+.pill-lean {
+  background: rgba(242, 116, 116, 0.18);
+  border-color: rgba(242, 116, 116, 0.48);
+  color: #ffb8b8;
+}
+
 .btn {
   padding: 6px 11px;
   border-radius: var(--radius-sm);
@@ -289,7 +308,7 @@ pre {
 /* Left Villager Roster */
 .hud-roster {
   position: fixed;
-  top: 74px;
+  top: var(--hud-top);
   left: 14px;
   z-index: 15;
   width: 176px;
@@ -381,7 +400,7 @@ pre {
 /* Right Drawer */
 .hud-panel {
   position: fixed;
-  top: 74px;
+  top: var(--hud-top);
   right: 14px;
   bottom: 68px;
   width: 360px;
@@ -435,7 +454,7 @@ pre {
 
 .reopen-pill {
   position: fixed;
-  top: 74px;
+  top: var(--hud-top);
   right: 14px;
   z-index: 18;
   padding: 8px 13px;
@@ -491,6 +510,12 @@ pre {
 }
 .event-row.kind-socialize {
   border-left-color: var(--sky);
+}
+.event-row.kind-gossip {
+  border-left-color: #a88cff;
+}
+.event-row.kind-gift {
+  border-left-color: #ff8fb3;
 }
 .event-row.kind-wage,
 .event-row.kind-demand {
@@ -664,6 +689,94 @@ pre {
   gap: 4px;
   color: var(--text);
   font-size: 12px;
+}
+
+.bond-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.bond-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 74px 1fr 56px;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-card);
+  cursor: pointer;
+  text-align: left;
+  font-size: 12px;
+}
+
+.bond-row:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.bond-bar-track {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  overflow: hidden;
+}
+
+.bond-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--sky);
+}
+
+.bond-row.tier-warm .bond-bar-fill {
+  background: var(--teal);
+}
+
+.bond-row.tier-close .bond-bar-fill {
+  background: var(--accent);
+}
+
+.bond-tier {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.bond-row.tier-close .bond-tier {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.bond-row.tier-warm .bond-tier {
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.rumor-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rumor-item {
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(168, 140, 255, 0.1);
+  border: 1px solid rgba(168, 140, 255, 0.28);
+  font-size: 12px;
+}
+
+.rumor-meta {
+  display: block;
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 .prompt-box {

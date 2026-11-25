@@ -45,21 +45,27 @@ function scoreDawnFocus(instructions: string, criteriaKeys: string[]): Record<st
   const social = parseFloatMetric(instructions, "social", 0.6);
   const isChild = /\bthe child\b/i.test(instructions);
   const isGuard = /\bthe guard\b/i.test(instructions);
+  const isRain = /\brain\b/i.test(instructions);
+  const isThriving = /\bprosperity\s+thriving\b/i.test(instructions);
+  const isLean = /\bprosperity\s+lean\b/i.test(instructions);
 
   const raw: Record<string, number> = {};
   for (const key of criteriaKeys) {
     switch (key) {
       case "duty":
-        raw[key] = isChild ? 0.25 : isGuard ? 0.55 : 0.42;
+        raw[key] = (isChild ? 0.25 : isGuard ? 0.55 : 0.42) * (isLean ? 1.25 : 1);
         break;
       case "earn":
-        raw[key] = isChild ? 0.1 : gold < 14 ? 0.5 : 0.28;
+        raw[key] =
+          (isChild ? 0.1 : gold < 14 ? 0.5 : 0.28) * (isLean ? 1.3 : isThriving ? 0.85 : 1);
         break;
       case "socialize":
-        raw[key] = social < 0.6 ? 0.35 : isChild ? 0.45 : 0.22;
+        raw[key] =
+          (social < 0.6 ? 0.35 : isChild ? 0.45 : 0.22) *
+          (isThriving ? 1.35 : isRain ? 1.15 : isLean ? 0.78 : 1);
         break;
       case "rest":
-        raw[key] = energy < 0.7 ? 0.35 : 0.12;
+        raw[key] = (energy < 0.7 ? 0.35 : 0.12) * (isRain ? 1.28 : 1);
         break;
       default:
         raw[key] = 0.2;
@@ -85,6 +91,9 @@ function scoreTickAction(
   const isBaker = /\bthe baker\b/i.test(instructions);
   const isFarmer = /\bthe farmer\b/i.test(instructions);
   const isInnkeeper = /\bthe innkeeper\b/i.test(instructions);
+  const isRain = /\bweather\s+rain\b/i.test(instructions);
+  const isThriving = /\bprosperity\s+thriving\b/i.test(stateSummary);
+  const heardShortage = /\bHeard:.*\b(?:short|low)\b/i.test(instructions);
 
   // Check village bread stock from shared world state so baker responds to scarcity
   const breadMatch = /bread\s+(\d+)/i.exec(stateSummary);
@@ -124,18 +133,22 @@ function scoreTickAction(
         if (focus === "socialize") score *= 0.75;
         if (isBaker && villageBread < 4) score *= 1.9;
         if (isFarmer) score *= 1.15;
+        if (heardShortage && (isFarmer || isBaker || isInnkeeper)) score *= 1.25;
         break;
       }
 
       case "rest": {
         score = energy < 0.22 ? 2.2 : 0.75;
         if (focus === "rest") score *= 1.7;
+        if (isRain) score *= 1.15;
         break;
       }
 
       case "socialize": {
         score = social < 0.35 ? 1.15 : 0.48;
         if (focus === "socialize") score *= 1.85;
+        if (isThriving) score *= 1.18;
+        if (isRain) score *= 1.15;
         break;
       }
 
@@ -146,7 +159,7 @@ function scoreTickAction(
       }
 
       case "wander": {
-        score = 0.45;
+        score = isRain ? 0.28 : 0.45;
         if (focus === "socialize" || focus === "rest") score *= 1.3;
         break;
       }
