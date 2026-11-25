@@ -1,5 +1,5 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, join } from "node:path";
 import {
   ReplayProvider,
   VillageSimulation,
@@ -15,7 +15,11 @@ import {
   type SimEvent,
   type TickSnapshot,
 } from "@village/core";
-import { createProviderForConfig } from "./config-loader.ts";
+import {
+  createProviderForConfig,
+  getInvocationCwd,
+  resolveFromInvocationCwd,
+} from "./config-loader.ts";
 
 export interface LiveStatus {
   running: boolean;
@@ -59,7 +63,9 @@ export class LiveSimManager {
   constructor(initialConfig: SimConfig, options: { tickMs?: number; runsDir?: string } = {}) {
     this.config = { ...initialConfig };
     this.tickMs = options.tickMs ?? 850;
-    this.runsDir = resolve(options.runsDir ?? join(process.cwd(), "runs"));
+    this.runsDir = options.runsDir
+      ? resolveFromInvocationCwd(options.runsDir)
+      : join(getInvocationCwd(), "runs");
     this.sim = this.createSimulation(this.config);
     this.latestSnapshot = this.makeInitialSnapshot();
   }

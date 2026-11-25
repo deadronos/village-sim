@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import {
   DEFAULT_CONFIG,
   ReplayProvider,
@@ -11,7 +11,13 @@ import {
   parseJsonl,
   serializeJsonl,
 } from "@village/core";
-import { buildResolvedConfig, createProviderForConfig, parseCliArgs } from "./config-loader.ts";
+import {
+  buildResolvedConfig,
+  createProviderForConfig,
+  getInvocationCwd,
+  parseCliArgs,
+  resolveFromInvocationCwd,
+} from "./config-loader.ts";
 import { startVillageServer } from "./server.ts";
 
 function printHelp(): void {
@@ -35,7 +41,7 @@ Options (CLI > env > village.config.json > defaults):
   --min-conf <0..1>     Escalation threshold (env: DECISION_MIN_CONF)
   --timeout-ms <ms>     Request timeout (env: DECISION_TIMEOUT_MS)
   --api-key <token>     Optional bearer token (env: DECISION_API_KEY)
-  --out <path>          JSONL output path (default: runs/seed-<seed>.jsonl)
+  --out <path>          JSONL output path (default: runs/seed-<seed>.jsonl, relative to cwd)
   --explain <entity>    Print explain report for entity after run
   --quiet               Suppress per-event timeline output (JSONL still written)
 `);
@@ -63,8 +69,8 @@ async function cmdRun(flags: Record<string, string | boolean>): Promise<number> 
 
   const outPath =
     typeof flags.out === "string"
-      ? resolve(flags.out)
-      : resolve(process.cwd(), "runs", `seed-${config.seed}.jsonl`);
+      ? resolveFromInvocationCwd(flags.out)
+      : resolveFromInvocationCwd(join("runs", `seed-${config.seed}.jsonl`));
 
   mkdirSync(dirname(outPath), { recursive: true });
   writeFileSync(outPath, serializeJsonl(result.records), "utf8");
@@ -96,7 +102,7 @@ async function cmdReplay(
     return 1;
   }
 
-  const raw = readFileSync(resolve(filePath), "utf8");
+  const raw = readFileSync(resolveFromInvocationCwd(filePath), "utf8");
   const parsed = parseJsonl(raw);
   if (!parsed.header) {
     console.error(`Missing header record in ${filePath}`);
@@ -155,7 +161,7 @@ function cmdExplain(flags: Record<string, string | boolean>): number {
     return 1;
   }
 
-  const parsed = parseJsonl(readFileSync(resolve(runPath), "utf8"));
+  const parsed = parseJsonl(readFileSync(resolveFromInvocationCwd(runPath), "utf8"));
   const rec = explainLastDecision(parsed.decisions, entityId);
   if (!rec) {
     console.error(`No decisions found for entity "${entityId}" in ${runPath}`);
@@ -180,7 +186,7 @@ async function cmdServe(flags: Record<string, string | boolean>): Promise<number
     config,
     tickMs,
     autostart,
-    runsDir: join(process.cwd(), "runs"),
+    runsDir: join(getInvocationCwd(), "runs"),
   });
 
   console.log(`[village] Live simulation backend listening on ${handle.url}`);

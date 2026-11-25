@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { extname, join, resolve } from "node:path";
+import { extname, join } from "node:path";
 import {
   SystemOneProvider,
   VILLAGE_EDGES,
@@ -10,6 +10,7 @@ import {
   type PartialSimConfig,
   type SimConfig,
 } from "@village/core";
+import { resolveFromInvocationCwd } from "./config-loader.ts";
 import { LiveSimManager } from "./runner.ts";
 
 const MIME_TYPES: Record<string, string> = {
@@ -83,7 +84,7 @@ export async function startVillageServer(options: StartServerOptions): Promise<L
     runsDir: options.runsDir,
   });
 
-  const staticDir = options.staticDir ?? resolve(process.cwd(), "packages/web/dist");
+  const staticDir = options.staticDir ?? resolveFromInvocationCwd("packages/web/dist");
 
   const server = createServer(async (req, res) => {
     const method = req.method ?? "GET";
