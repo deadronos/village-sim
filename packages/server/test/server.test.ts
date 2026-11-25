@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +8,7 @@ import {
   DEFAULT_CONFIG,
   ScriptedProvider,
   VillageSimulation,
+  parseJsonl,
   serializeJsonl,
   type JsonlRecord,
 } from "@village/core";
@@ -398,5 +400,154 @@ describe("CLI and live backend server", () => {
     const loaded = loadDotEnv({ INIT_CWD: nestedDir });
     expect(loaded.DECISION_PROVIDER).toBe("systemone");
     expect(loaded.DECISION_MODEL).toBe("ws-root-model");
+  });
+
+  it("fails fast on unreachable System One endpoint unless --allow-degraded is passed, and records startup health in the header", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-health-"));
+    const failedOut = join(tempDir, "failed.jsonl");
+    const degradedOut = join(tempDir, "degraded.jsonl");
+    const healthyOut = join(tempDir, "healthy.jsonl");
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    // Without --allow-degraded, CLI refuses to start and writes no log
+    const failCode = await runCli([
+      "run",
+      "--provider",
+      "systemone",
+      "--endpoint",
+      "http://127.0.0.1:1/v1/systemone",
+      "--days",
+      "1",
+      "--out",
+      failedOut,
+      "--quiet",
+    ]);
+    expect(failCode).toBe(1);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("http://127.0.0.1:1/v1/systemone"),
+    );
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("--allow-degraded"));
+    expect(existsSync(failedOut)).toBe(false);
+
+    // With --allow-degraded, CLI warns, starts immediately in scripted fallback, and records probe in header
+    const degradedCode = await runCli([
+      "run",
+      "--provider",
+      "systemone",
+      "--endpoint",
+      "http://127.0.0.1:1/v1/systemone",
+      "--days",
+      "1",
+      "--out",
+      degradedOut,
+      "--allow-degraded",
+      "--quiet",
+    ]);
+    expect(degradedCode).toBe(0);
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("--allow-degraded"));
+    const degradedParsed = parseJsonl(readFileSync(degradedOut, "utf8"));
+    expect(degradedParsed.header?.startupHealth?.ok).toBe(false);
+    expect(degradedParsed.header?.initialFallbackActive).toBe(true);
+
+    // Against a healthy endpoint, CLI records ok startupHealth and initialFallbackActive=false
+    const mockEndpoint: Server = createServer((req, res) => {
+      if (req.url === "/v1/models") {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ data: [{ id: "kev-latest" }] }));
+        return;
+      }
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += String(chunk);
+      });
+      req.on("end", () => {
+        const body = JSON.parse(raw) as {
+          questions: Record<string, { criteria: Record<string, string> }>;
+        };
+        const answers = Object.fromEntries(
+          Object.entries(body.questions).map(([id, q]) => {
+            const first = Object.keys(q.criteria)[0]!;
+            return [id, { probabilities: { [first]: 1 } }];
+          }),
+        );
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ answers }));
+      });
+    });
+
+    await new Promise<void>((r) => mockEndpoint.listen(0, "127.0.0.1", () => r()));
+    const addr = mockEndpoint.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    try {
+      const healthyCode = await runCli([
+        "run",
+        "--provider",
+        "systemone",
+        "--endpoint",
+        `http://127.0.0.1:${port}/v1/systemone`,
+        "--days",
+        "1",
+        "--out",
+        healthyOut,
+        "--quiet",
+      ]);
+      expect(healthyCode).toBe(0);
+      const healthyParsed = parseJsonl(readFileSync(healthyOut, "utf8"));
+      expect(healthyParsed.header?.startupHealth).toEqual({ ok: true, status: 200 });
+      expect(healthyParsed.header?.initialFallbackActive).toBe(false);
+    } finally {
+      await new Promise<void>((r) => mockEndpoint.close(() => r()));
+    }
+  });
+
+  it("exposes partial provider degradation in LiveSimManager status while keeping fallbackActive false", async () => {
+    tempDir = mkdtempSync(join(tmpdir(), "village-sim-degraded-"));
+    const partialEndpoint: Server = createServer((req, res) => {
+      let raw = "";
+      req.on("data", (chunk) => {
+        raw += String(chunk);
+      });
+      req.on("end", () => {
+        const body = JSON.parse(raw) as {
+          questions: Record<string, { criteria: Record<string, string> }>;
+        };
+        const firstEntry = Object.entries(body.questions)[0];
+        const answers: Record<string, unknown> = {};
+        if (firstEntry) {
+          const [id, q] = firstEntry;
+          const firstAction = Object.keys(q.criteria)[0]!;
+          answers[id] = { probabilities: { [firstAction]: 1 } };
+        }
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ answers }));
+      });
+    });
+
+    await new Promise<void>((r) => partialEndpoint.listen(0, "127.0.0.1", () => r()));
+    const addr = partialEndpoint.address();
+    const port = typeof addr === "object" && addr ? addr.port : 0;
+    try {
+      const manager = new LiveSimManager(
+        {
+          ...DEFAULT_CONFIG,
+          provider: "systemone",
+          endpoint: `http://127.0.0.1:${port}/v1/systemone`,
+          batch: "always",
+          timeoutMs: 2000,
+        },
+        { runsDir: tempDir },
+      );
+
+      await manager.stepOnce();
+      await manager.stepOnce();
+      const status = manager.getStatus();
+      expect(status.fallbackActive).toBe(false);
+      expect(status.degraded).toBe(true);
+      expect(status.partialFallbackRate).toBeGreaterThan(0.5);
+      expect(status.warnings.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      await new Promise<void>((r) => partialEndpoint.close(() => r()));
+    }
   });
 });

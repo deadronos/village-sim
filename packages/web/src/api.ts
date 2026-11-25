@@ -23,6 +23,8 @@ export interface ClientStatus {
   effectiveTickMs?: number;
   lastTickMs?: number;
   fallbackActive: boolean;
+  degraded?: boolean;
+  partialFallbackRate?: number;
   mode: "live" | "replay";
   replayFile?: string;
   config: Pick<
@@ -145,6 +147,8 @@ export class VillageApiClient {
       effectiveTickMs: this.localTickMs,
       lastTickMs: 0,
       fallbackActive: false,
+      degraded: false,
+      partialFallbackRate: 0,
       mode: "live",
       config: {
         provider: this.localConfig.provider,

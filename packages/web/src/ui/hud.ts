@@ -251,18 +251,29 @@ export class VillageHud {
       effMs > status.tickMs
         ? `Target ${status.tickMs}ms · adaptive ${effMs}ms (last tick ${lastMs}ms)`
         : `Tick interval ${status.tickMs}ms`;
-    const provider = status.fallbackActive ? "scripted fallback" : status.config.provider;
+    const provider = status.fallbackActive
+      ? "scripted fallback"
+      : status.degraded
+        ? `${status.config.provider} (degraded)`
+        : status.config.provider;
     const providerLabel =
       status.mode === "replay"
         ? `replay (${status.replayFile ?? "jsonl"})`
         : `${provider} · seed ${status.config.seed}`;
     this.statProvider.textContent = providerLabel;
-    this.statProvider.title = providerLabel;
+    this.statProvider.title =
+      status.degraded && !status.fallbackActive && status.mode !== "replay"
+        ? `${providerLabel} · ${Math.round((status.partialFallbackRate ?? 0) * 100)}% partial fallback`
+        : providerLabel;
 
+    const degradedNotice =
+      status.degraded && !status.fallbackActive
+        ? `System One degraded: ${Math.round((status.partialFallbackRate ?? 0) * 100)}% of recent decisions used scripted fallback.`
+        : undefined;
     const latestWarning =
-      status.config.provider === "systemone" && status.fallbackActive === false
+      status.config.provider === "systemone" && status.fallbackActive === false && !status.degraded
         ? undefined
-        : status.warnings.at(-1);
+        : (status.warnings.at(-1) ?? degradedNotice);
     this.warningBanner.hidden = !latestWarning;
     this.warningBanner.textContent = latestWarning ?? "";
   }
